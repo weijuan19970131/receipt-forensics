@@ -1,13 +1,16 @@
 {
   "version": 2,
   "name": "receipt-forensics",
-  "builds": [
-    {
-      "src": "index.html",
-      "use": "@vercel/static"
+  "functions": {
+    "api/analyze.js": {
+      "maxDuration": 60
     }
-  ],
+  },
   "routes": [
+    {
+      "src": "/api/analyze",
+      "dest": "/api/analyze.js"
+    },
     {
       "src": "/(.*)",
       "dest": "/index.html"
