@@ -252,10 +252,12 @@ function loadFile(file){
     exifData=null;
     exifPromise=null;
     if(typeof exifr!=='undefined'){
-      exifPromise=exifr.parse(file,{tiff:true,exif:true,iptc:true,icc:true,jfif:true,ihdr:true}).then(function(exif){
+      exifPromise=exifr.parse(file,{tiff:true,exif:true,iptc:true,icc:true,jfif:true,ihdr:true,xmp:true,ifd0:true,ifd1:true}).then(function(exif){
         exifData=exif||{};
-        var sw=exifData.Software||exifData.software||'';
-        var dt=exifData.DateTimeOriginal||exifData.DateTime||exifData.CreateDate||'';
+        console.log('[EXIF raw]', JSON.stringify(exifData));
+        var sw=exifData.Software||exifData.software||exifData.ApplicationRecordVersion||'';
+        var dt=exifData.DateTimeOriginal||exifData.DateTimeDigitized||exifData.DateTime||exifData.CreateDate||exifData.ModifyDate||null;
+        console.log('[EXIF sw]', sw, '[EXIF dt]', dt);
         document.getElementById('metaExifSw').textContent=sw||'—';
         document.getElementById('metaExifDt').textContent=dt?new Date(dt).toLocaleString('zh-TW'):'—';
         if(sw){
@@ -264,7 +266,7 @@ function loadFile(file){
             if(swLow.indexOf(BLACKLIST[i])!==-1){showBLAlert([sw]);break;}
           }
         }
-      }).catch(function(){exifData={};});
+      }).catch(function(e){console.log('[EXIF error]',e);exifData={};});
     }
     URL.revokeObjectURL(url);
   };
@@ -376,9 +378,25 @@ scanBtn.addEventListener('click',function(){
     return{status:'pass',detail:'未偵測到修圖軟體關鍵字',hits:[]};
   }
 
+  function parseExifDate(val){
+    if(!val)return null;
+    if(val instanceof Date)return val;
+    // EXIF format: "2026:02:19 16:51:00"
+    if(typeof val==='string'&&val.indexOf(':')===4){
+      val=val.replace(/^(\d{4}):(\d{2}):(\d{2})/,'$1-$2-$3');
+    }
+    var d=new Date(val);
+    return isNaN(d.getTime())?null:d;
+  }
+
+  function getExifDate(){
+    if(!exifData)return null;
+    return parseExifDate(exifData.DateTimeOriginal||exifData.DateTimeDigitized||exifData.DateTime||exifData.CreateDate||exifData.ModifyDate||null);
+  }
+
   function chkExifData(){
     if(!exifData)return{status:'warn',detail:'EXIF 資料尚未載入或不存在'};
-    var issues=[],sw=exifData.Software||exifData.software||'',dt=exifData.DateTimeOriginal||exifData.DateTime||exifData.CreateDate||null;
+    var issues=[],sw=exifData.Software||exifData.software||'',dt=getExifDate();
     // Check software blacklist
     if(sw){
       var swLow=sw.toLowerCase();
@@ -388,16 +406,14 @@ scanBtn.addEventListener('click',function(){
     }
     // Check EXIF capture date vs file modified date
     if(dt){
-      var exifDate=new Date(dt);
       var fileDate=new Date(currentFile.lastModified);
-      var diffDays=Math.abs(exifDate-fileDate)/(1000*60*60*24);
-      if(diffDays>7)issues.push('EXIF 拍攝日期（'+exifDate.toLocaleDateString('zh-TW')+'）與檔案修改日期相差 '+Math.round(diffDays)+' 天，異常');
-      // Check if exif date is in the future
-      if(exifDate>new Date())issues.push('EXIF 拍攝日期為未來時間（'+exifDate.toLocaleDateString('zh-TW')+'），異常');
+      var diffDays=Math.abs(dt-fileDate)/(1000*60*60*24);
+      if(diffDays>7)issues.push('EXIF 拍攝日期（'+dt.toLocaleDateString('zh-TW')+'）與檔案存檔日期相差 '+Math.round(diffDays)+' 天，異常');
+      if(dt>new Date())issues.push('EXIF 拍攝日期為未來時間（'+dt.toLocaleDateString('zh-TW')+'），異常');
     }
     var detail='';
     if(sw)detail+='軟體：'+sw+'　';
-    if(dt)detail+='拍攝：'+new Date(dt).toLocaleDateString('zh-TW');
+    if(dt)detail+='拍攝：'+dt.toLocaleDateString('zh-TW');
     if(!sw&&!dt)return{status:'warn',detail:'圖片不含 EXIF 拍攝資訊'};
     if(issues.length>0)return{status:'fail',detail:issues.join('；')};
     return{status:'pass',detail:detail||'EXIF 資訊正常'};
@@ -411,8 +427,8 @@ scanBtn.addEventListener('click',function(){
 
     // Priority 1: use EXIF capture date if available
     if(exifData){
-      var rawDt=exifData.DateTimeOriginal||exifData.DateTime||exifData.CreateDate||null;
-      if(rawDt){refDate=new Date(rawDt);refLabel='EXIF 拍攝日期';}
+      var exifDt=getExifDate();
+      if(exifDt){refDate=exifDt;refLabel='EXIF 拍攝日期';}
     }
     // Priority 2: fall back to file modified date
     if(!refDate){refDate=new Date(currentFile.lastModified);refLabel='檔案修改時間';}
