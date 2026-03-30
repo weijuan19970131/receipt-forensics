@@ -1,1210 +1,512 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>回單鑑真系統 · Receipt Forensics</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --bg: #0a0c10;
-      --surface: #111318;
-      --surface2: #181c24;
-      --border: #1e2430;
-      --border-bright: #2a3345;
-      --accent: #00e5ff;
-      --accent2: #ff3d5a;
-      --accent3: #ffe44d;
-      --text: #c8d4e8;
-      --text-dim: #5a6a82;
-      --text-bright: #eef2fa;
-      --safe: #00c896;
-      --warn: #ff9f1c;
-      --danger: #ff3d5a;
-      --grid-color: rgba(0, 229, 255, 0.08);
-      --grid-size: 40px;
-      --font-mono: 'Space Mono', monospace;
-      --font-body: 'Noto Sans TC', sans-serif;
-      --radius: 6px;
-      --glow: 0 0 20px rgba(0, 229, 255, 0.15);
-    }
-
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font-body);
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-
-    /* === GRID OVERLAY === */
-    #gridOverlay {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 9999;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      background-image:
-        linear-gradient(var(--grid-color) 1px, transparent 1px),
-        linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-      background-size: var(--grid-size) var(--grid-size);
-    }
-    #gridOverlay.active { opacity: 1; }
-    #gridOverlay .h-ruler {
-      position: absolute; inset: 0;
-      background-image: repeating-linear-gradient(
-        transparent,
-        transparent calc(var(--grid-size) - 1px),
-        rgba(0,229,255,0.18) calc(var(--grid-size) - 1px),
-        rgba(0,229,255,0.18) var(--grid-size)
-      );
-    }
-
-    /* === SCAN LINE ANIMATION === */
-    @keyframes scanline {
-      0% { transform: translateY(-100%); opacity: 0.6; }
-      100% { transform: translateY(100vh); opacity: 0; }
-    }
-    .scan-line {
-      position: fixed; left: 0; right: 0; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
-      pointer-events: none; z-index: 9998;
-      animation: scanline 2s linear infinite;
-      display: none;
-    }
-    body.scanning .scan-line { display: block; }
-
-    /* === HEADER === */
-    header {
-      border-bottom: 1px solid var(--border);
-      padding: 0 32px;
-      height: 64px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(10,12,16,0.95);
-      backdrop-filter: blur(12px);
-    }
-    .logo {
-      display: flex; align-items: center; gap: 12px;
-    }
-    .logo-icon {
-      width: 32px; height: 32px;
-      background: var(--accent);
-      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-      display: flex; align-items: center; justify-content: center;
-      color: #000; font-size: 14px; font-family: var(--font-mono); font-weight: 700;
-    }
-    .logo-text {
-      font-family: var(--font-mono); font-size: 13px; color: var(--text-bright);
-      letter-spacing: 0.08em;
-    }
-    .logo-text span { color: var(--accent); }
-    .header-right { display: flex; align-items: center; gap: 12px; }
-    .badge {
-      font-family: var(--font-mono); font-size: 10px;
-      padding: 3px 8px; border-radius: 2px;
-      border: 1px solid; letter-spacing: 0.1em;
-    }
-    .badge-version { color: var(--text-dim); border-color: var(--border-bright); }
-
-    /* === LAYOUT === */
-    main {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 32px 24px;
-      display: grid;
-      grid-template-columns: 1fr 420px;
-      grid-template-rows: auto auto 1fr;
-      gap: 20px;
-      min-height: calc(100vh - 64px);
-    }
-
-    /* === PANEL === */
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
-    .panel-header {
-      padding: 14px 20px;
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-      background: var(--surface2);
-    }
-    .panel-title {
-      font-family: var(--font-mono); font-size: 11px;
-      color: var(--text-dim); letter-spacing: 0.12em;
-      text-transform: uppercase;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .panel-title::before {
-      content: ''; width: 6px; height: 6px;
-      background: var(--accent); border-radius: 50%;
-      box-shadow: 0 0 8px var(--accent);
-    }
-    .panel-body { padding: 20px; }
-
-    /* === UPLOAD ZONE === */
-    #uploadZone {
-      border: 2px dashed var(--border-bright);
-      border-radius: var(--radius);
-      padding: 48px 24px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.25s ease;
-      position: relative;
-      overflow: hidden;
-    }
-    #uploadZone::before {
-      content: '';
-      position: absolute; inset: 0;
-      background: radial-gradient(ellipse at 50% 0%, rgba(0,229,255,0.04) 0%, transparent 70%);
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-    #uploadZone:hover, #uploadZone.dragover {
-      border-color: var(--accent);
-      box-shadow: var(--glow);
-    }
-    #uploadZone:hover::before, #uploadZone.dragover::before { opacity: 1; }
-    #uploadZone.has-image { padding: 0; border-style: solid; border-color: var(--border-bright); }
-
-    .upload-icon {
-      font-size: 40px; margin-bottom: 16px;
-      filter: grayscale(0.5);
-    }
-    .upload-title {
-      font-family: var(--font-mono); font-size: 13px;
-      color: var(--text-bright); margin-bottom: 8px;
-    }
-    .upload-subtitle {
-      font-size: 12px; color: var(--text-dim); line-height: 1.6;
-    }
-    .upload-formats {
-      margin-top: 16px;
-      display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
-    }
-    .fmt-tag {
-      font-family: var(--font-mono); font-size: 10px;
-      padding: 2px 8px; border: 1px solid var(--border-bright);
-      color: var(--text-dim); border-radius: 2px;
-    }
-
-    /* === IMAGE PREVIEW === */
-    #previewWrapper {
-      position: relative; display: none;
-    }
-    #previewWrapper.visible { display: block; }
-    #previewImg {
-      width: 100%; display: block;
-      border-radius: var(--radius);
-    }
-    .preview-overlay {
-      position: absolute; inset: 0;
-      border-radius: var(--radius);
-      pointer-events: none;
-    }
-
-    /* === CONTROLS === */
-    .controls-row {
-      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-    }
-    .btn {
-      font-family: var(--font-mono); font-size: 11px;
-      padding: 10px 20px; border: 1px solid; border-radius: var(--radius);
-      cursor: pointer; letter-spacing: 0.08em;
-      transition: all 0.2s ease; white-space: nowrap;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .btn-primary {
-      background: var(--accent); color: #000;
-      border-color: var(--accent);
-      font-weight: 700;
-    }
-    .btn-primary:hover { box-shadow: 0 0 24px rgba(0,229,255,0.4); transform: translateY(-1px); }
-    .btn-primary:disabled {
-      opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none;
-    }
-    .btn-secondary {
-      background: transparent; color: var(--text);
-      border-color: var(--border-bright);
-    }
-    .btn-secondary:hover { border-color: var(--text-dim); color: var(--text-bright); }
-    .btn-grid {
-      background: transparent; color: var(--accent);
-      border-color: var(--accent); margin-left: auto;
-    }
-    .btn-grid.active {
-      background: rgba(0,229,255,0.1);
-      box-shadow: var(--glow);
-    }
-    .btn-grid:hover { background: rgba(0,229,255,0.08); }
-
-    /* === RIGHT PANEL === */
-    .right-col {
-      grid-column: 2;
-      grid-row: 1 / -1;
-      display: flex; flex-direction: column; gap: 16px;
-    }
-
-    /* === RISK METER === */
-    .risk-meter {
-      padding: 20px;
-    }
-    .risk-label {
-      font-family: var(--font-mono); font-size: 10px;
-      color: var(--text-dim); letter-spacing: 0.12em;
-      margin-bottom: 10px;
-    }
-    .risk-score {
-      font-family: var(--font-mono); font-size: 52px;
-      font-weight: 700; line-height: 1;
-      color: var(--text-bright);
-      transition: color 0.5s;
-    }
-    .risk-score.safe { color: var(--safe); }
-    .risk-score.warn { color: var(--warn); }
-    .risk-score.danger { color: var(--danger); }
-    .risk-bar-track {
-      height: 4px; background: var(--border-bright);
-      border-radius: 2px; margin: 12px 0 6px;
-      overflow: hidden;
-    }
-    .risk-bar-fill {
-      height: 100%; width: 0%;
-      background: var(--safe);
-      border-radius: 2px;
-      transition: width 1s ease, background 0.5s;
-    }
-    .risk-verdict {
-      font-family: var(--font-mono); font-size: 11px;
-      letter-spacing: 0.08em;
-    }
-
-    /* === CHECK ITEMS === */
-    .checks-list { display: flex; flex-direction: column; gap: 2px; }
-    .check-item {
-      display: flex; align-items: flex-start; gap: 10px;
-      padding: 10px 12px;
-      border-radius: 4px;
-      border: 1px solid transparent;
-      transition: all 0.3s ease;
-      cursor: default;
-    }
-    .check-item.pending { opacity: 0.35; }
-    .check-item.running {
-      border-color: var(--border-bright);
-      background: rgba(0,229,255,0.03);
-    }
-    .check-item.pass {
-      border-color: rgba(0,200,150,0.2);
-      background: rgba(0,200,150,0.04);
-    }
-    .check-item.fail {
-      border-color: rgba(255,61,90,0.25);
-      background: rgba(255,61,90,0.05);
-    }
-    .check-item.warn-state {
-      border-color: rgba(255,159,28,0.25);
-      background: rgba(255,159,28,0.05);
-    }
-    .check-icon {
-      font-size: 14px; flex-shrink: 0; margin-top: 1px;
-      width: 16px; text-align: center;
-    }
-    .check-content { flex: 1; }
-    .check-name {
-      font-size: 12px; font-weight: 500; color: var(--text-bright);
-      margin-bottom: 2px; line-height: 1.3;
-    }
-    .check-detail {
-      font-size: 11px; color: var(--text-dim); line-height: 1.4;
-    }
-    .check-item.fail .check-detail { color: var(--danger); }
-    .check-item.warn-state .check-detail { color: var(--warn); }
-    .check-item.pass .check-detail { color: var(--safe); }
-
-    /* === METADATA PANEL === */
-    .meta-grid {
-      display: grid; grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-    .meta-item {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 4px; padding: 10px 12px;
-    }
-    .meta-key {
-      font-family: var(--font-mono); font-size: 9px;
-      color: var(--text-dim); letter-spacing: 0.1em;
-      margin-bottom: 4px; text-transform: uppercase;
-    }
-    .meta-val {
-      font-family: var(--font-mono); font-size: 11px;
-      color: var(--text-bright); word-break: break-all;
-      line-height: 1.4;
-    }
-    .meta-val.blacklisted {
-      color: var(--danger);
-      font-weight: 700;
-    }
-
-    /* === RESULTS AREA === */
-    #resultsSection { grid-column: 1; }
-    #resultsSection .panel-body { padding: 0; }
-    .results-empty {
-      padding: 48px 24px;
-      text-align: center; color: var(--text-dim);
-      font-family: var(--font-mono); font-size: 12px;
-      line-height: 2;
-    }
-    .results-content { padding: 20px; }
-
-    /* === AI SUMMARY === */
-    .ai-summary {
-      background: var(--surface2);
-      border: 1px solid var(--border-bright);
-      border-radius: var(--radius);
-      padding: 16px;
-      font-size: 13px;
-      line-height: 1.8;
-      color: var(--text);
-      white-space: pre-wrap;
-      font-family: var(--font-body);
-    }
-
-    /* === BLACKLIST ALERT === */
-    .blacklist-alert {
-      display: none;
-      margin-top: 12px;
-      padding: 12px 16px;
-      background: rgba(255,61,90,0.08);
-      border: 1px solid rgba(255,61,90,0.3);
-      border-radius: var(--radius);
-    }
-    .blacklist-alert.visible { display: flex; gap: 10px; align-items: flex-start; }
-    .blacklist-alert .alert-icon { font-size: 18px; flex-shrink: 0; }
-    .blacklist-title {
-      font-family: var(--font-mono); font-size: 11px;
-      color: var(--danger); font-weight: 700; letter-spacing: 0.06em;
-      margin-bottom: 4px;
-    }
-    .blacklist-items {
-      font-family: var(--font-mono); font-size: 11px;
-      color: var(--text); line-height: 1.8;
-    }
-
-    /* === LOADING === */
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-    @keyframes spin { to{transform:rotate(360deg)} }
-    .spinner {
-      width: 14px; height: 14px;
-      border: 2px solid var(--border-bright);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      flex-shrink: 0;
-    }
-
-    /* === PROGRESS === */
-    .progress-bar {
-      height: 2px; background: var(--border-bright);
-      border-radius: 1px; overflow: hidden; margin-top: 8px;
-    }
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--accent), var(--safe));
-      width: 0%; transition: width 0.5s ease;
-      position: relative;
-    }
-    .progress-fill::after {
-      content: '';
-      position: absolute; right: 0; top: -2px;
-      width: 6px; height: 6px;
-      background: var(--accent);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--accent);
-    }
-
-    /* === INPUT FILE HIDDEN === */
-    #fileInput { display: none; }
-
-    /* === SCROLLBAR === */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
-
-    /* === FOOTER === */
-    footer {
-      grid-column: 1 / -1;
-      text-align: center; padding: 16px;
-      font-family: var(--font-mono); font-size: 10px;
-      color: var(--text-dim); letter-spacing: 0.08em;
-      border-top: 1px solid var(--border);
-    }
-
-    /* === RESPONSIVE === */
-    @media (max-width: 900px) {
-      main { grid-template-columns: 1fr; }
-      .right-col { grid-column: 1; grid-row: auto; }
-    }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>回單鑑真系統 · Receipt Forensics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#0a0c10;--surface:#111318;--surface2:#181c24;--border:#1e2430;--border-bright:#2a3345;--accent:#00e5ff;--text:#c8d4e8;--text-dim:#5a6a82;--text-bright:#eef2fa;--safe:#00c896;--warn:#ff9f1c;--danger:#ff3d5a;--grid-color:rgba(0,229,255,0.08);--grid-size:40px;--font-mono:'Space Mono',monospace;--font-body:'Noto Sans TC',sans-serif;--radius:6px;--glow:0 0 20px rgba(0,229,255,0.15);}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;overflow-x:hidden;}
+#gridOverlay{position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0;transition:opacity 0.3s;background-image:linear-gradient(var(--grid-color) 1px,transparent 1px),linear-gradient(90deg,var(--grid-color) 1px,transparent 1px);background-size:var(--grid-size) var(--grid-size);}
+#gridOverlay.active{opacity:1;}
+header{border-bottom:1px solid var(--border);padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;background:rgba(10,12,16,0.95);backdrop-filter:blur(12px);}
+.logo{display:flex;align-items:center;gap:12px;}
+.logo-icon{width:32px;height:32px;background:var(--accent);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);display:flex;align-items:center;justify-content:center;color:#000;font-size:12px;font-family:var(--font-mono);font-weight:700;}
+.logo-text{font-family:var(--font-mono);font-size:13px;color:var(--text-bright);letter-spacing:0.08em;}
+.logo-text span{color:var(--accent);}
+.badge{font-family:var(--font-mono);font-size:10px;padding:3px 8px;border-radius:2px;border:1px solid var(--border-bright);color:var(--text-dim);letter-spacing:0.1em;}
+main{max-width:1400px;margin:0 auto;padding:32px 24px;display:grid;grid-template-columns:1fr 420px;gap:20px;min-height:calc(100vh - 64px);}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.panel-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surface2);}
+.panel-title{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);letter-spacing:0.12em;text-transform:uppercase;display:flex;align-items:center;gap:8px;}
+.panel-title::before{content:'';width:6px;height:6px;background:var(--accent);border-radius:50%;box-shadow:0 0 8px var(--accent);}
+.panel-body{padding:20px;}
+#uploadZone{border:2px dashed var(--border-bright);border-radius:var(--radius);padding:48px 24px;text-align:center;cursor:pointer;transition:all 0.25s ease;position:relative;overflow:hidden;}
+#uploadZone:hover,#uploadZone.dragover{border-color:var(--accent);box-shadow:var(--glow);}
+#uploadZone.has-image{padding:0;border-style:solid;border-color:var(--border-bright);}
+.upload-icon{font-size:40px;margin-bottom:16px;}
+.upload-title{font-family:var(--font-mono);font-size:13px;color:var(--text-bright);margin-bottom:8px;}
+.upload-subtitle{font-size:12px;color:var(--text-dim);line-height:1.6;}
+.upload-formats{margin-top:16px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;}
+.fmt-tag{font-family:var(--font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--border-bright);color:var(--text-dim);border-radius:2px;}
+#previewWrapper{display:none;}
+#previewWrapper.visible{display:block;}
+#previewImg{width:100%;display:block;border-radius:var(--radius);}
+.controls-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;}
+.btn{font-family:var(--font-mono);font-size:11px;padding:10px 20px;border:1px solid;border-radius:var(--radius);cursor:pointer;letter-spacing:0.08em;transition:all 0.2s ease;white-space:nowrap;display:flex;align-items:center;gap:8px;}
+.btn-primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700;}
+.btn-primary:hover{box-shadow:0 0 24px rgba(0,229,255,0.4);transform:translateY(-1px);}
+.btn-primary:disabled{opacity:0.4;cursor:not-allowed;transform:none;box-shadow:none;}
+.btn-secondary{background:transparent;color:var(--text);border-color:var(--border-bright);}
+.btn-secondary:hover{border-color:var(--text-dim);color:var(--text-bright);}
+.btn-grid{background:transparent;color:var(--accent);border-color:var(--accent);margin-left:auto;}
+.btn-grid.active{background:rgba(0,229,255,0.1);box-shadow:var(--glow);}
+.blacklist-alert{display:none;margin-top:12px;padding:12px 16px;background:rgba(255,61,90,0.08);border:1px solid rgba(255,61,90,0.3);border-radius:var(--radius);}
+.blacklist-alert.visible{display:flex;gap:10px;align-items:flex-start;}
+.alert-icon{font-size:18px;flex-shrink:0;}
+.blacklist-title{font-family:var(--font-mono);font-size:11px;color:var(--danger);font-weight:700;letter-spacing:0.06em;margin-bottom:4px;}
+.blacklist-items{font-family:var(--font-mono);font-size:11px;color:var(--text);line-height:1.8;}
+.progress-bar{height:2px;background:var(--border-bright);border-radius:1px;overflow:hidden;margin-top:8px;display:none;}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--safe));width:0%;transition:width 0.4s ease;}
+.right-col{grid-column:2;grid-row:1/-1;display:flex;flex-direction:column;gap:16px;}
+.risk-meter{padding:20px;}
+.risk-label{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.12em;margin-bottom:10px;}
+.risk-score{font-family:var(--font-mono);font-size:52px;font-weight:700;line-height:1;color:var(--text-bright);transition:color 0.5s;}
+.risk-score.safe{color:var(--safe);}
+.risk-score.warn{color:var(--warn);}
+.risk-score.danger{color:var(--danger);}
+.risk-bar-track{height:4px;background:var(--border-bright);border-radius:2px;margin:12px 0 6px;overflow:hidden;}
+.risk-bar-fill{height:100%;width:0%;background:var(--safe);border-radius:2px;transition:width 1s ease,background 0.5s;}
+.risk-verdict{font-family:var(--font-mono);font-size:11px;letter-spacing:0.08em;}
+.checks-list{display:flex;flex-direction:column;gap:2px;}
+.check-item{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:4px;border:1px solid transparent;transition:all 0.3s ease;}
+.check-item.pending{opacity:0.35;}
+.check-item.running{border-color:var(--border-bright);background:rgba(0,229,255,0.03);}
+.check-item.pass{border-color:rgba(0,200,150,0.2);background:rgba(0,200,150,0.04);}
+.check-item.fail{border-color:rgba(255,61,90,0.25);background:rgba(255,61,90,0.05);}
+.check-item.warn-state{border-color:rgba(255,159,28,0.25);background:rgba(255,159,28,0.05);}
+.check-icon{font-size:14px;flex-shrink:0;margin-top:1px;width:16px;text-align:center;}
+.check-content{flex:1;}
+.check-name{font-size:12px;font-weight:500;color:var(--text-bright);margin-bottom:2px;line-height:1.3;}
+.check-detail{font-size:11px;color:var(--text-dim);line-height:1.4;}
+.check-item.fail .check-detail{color:var(--danger);}
+.check-item.warn-state .check-detail{color:var(--warn);}
+.check-item.pass .check-detail{color:var(--safe);}
+.meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.meta-item{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:10px 12px;}
+.meta-key{font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:4px;text-transform:uppercase;}
+.meta-val{font-family:var(--font-mono);font-size:11px;color:var(--text-bright);word-break:break-all;line-height:1.4;}
+#resultsSection{grid-column:1;}
+.results-empty{padding:48px 24px;text-align:center;color:var(--text-dim);font-family:var(--font-mono);font-size:12px;line-height:2;}
+.results-content{padding:20px;}
+.ai-summary{background:var(--surface2);border:1px solid var(--border-bright);border-radius:var(--radius);padding:16px;font-size:13px;line-height:1.8;color:var(--text);font-family:var(--font-body);}
+@keyframes spin{to{transform:rotate(360deg);}}
+.spinner{width:14px;height:14px;border:2px solid var(--border-bright);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;}
+#fileInput{display:none;}
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border-bright);border-radius:3px;}
+footer{grid-column:1/-1;text-align:center;padding:16px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.08em;border-top:1px solid var(--border);}
+#todoBanner{position:fixed;bottom:20px;right:20px;z-index:9000;background:#181c24;border:1px solid rgba(255,228,77,0.4);border-radius:8px;padding:14px 16px;max-width:290px;box-shadow:0 4px 24px rgba(0,0,0,0.5);font-family:var(--font-mono);}
+.todo-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.todo-title{font-size:11px;color:#ffe44d;letter-spacing:0.08em;font-weight:700;}
+.todo-close{margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;}
+.todo-item{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
+.todo-item input{margin-top:3px;accent-color:var(--accent);}
+.todo-item span{font-size:11px;color:var(--text);line-height:1.5;}
+.todo-item a{color:var(--accent);text-decoration:none;}
+.todo-item small{color:var(--text-dim);display:block;}
+.todo-footer{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);line-height:1.6;}
+@media(max-width:900px){main{grid-template-columns:1fr;}.right-col{grid-column:1;grid-row:auto;}}
+</style>
 </head>
 <body>
-
-<div class="scan-line"></div>
-<div id="gridOverlay"><div class="h-ruler"></div></div>
-
+<div id="gridOverlay"></div>
 <header>
   <div class="logo">
     <div class="logo-icon">RF</div>
-    <div class="logo-text">RECEIPT <span>FORENSICS</span> · 回單鑑真系統</div>
+    <div class="logo-text">RECEIPT <span>FORENSICS</span> &middot; 回單鑑真系統</div>
   </div>
-  <div class="header-right">
-    <span class="badge badge-version">v2.0 · AI POWERED</span>
-  </div>
+  <span class="badge">本地分析模式 &middot; LOCAL MODE</span>
 </header>
-
 <main>
-  <!-- LEFT COLUMN: Upload + Preview -->
-  <div style="grid-column:1; display:flex; flex-direction:column; gap:16px;">
-
-    <!-- Upload Panel -->
+  <div style="grid-column:1;display:flex;flex-direction:column;gap:16px;">
     <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">影像輸入 · IMAGE INPUT</span>
-      </div>
+      <div class="panel-header"><span class="panel-title">影像輸入 &middot; IMAGE INPUT</span></div>
       <div class="panel-body">
-        <input type="file" id="fileInput" accept="image/*" />
+        <input type="file" id="fileInput" accept="image/*"/>
         <div id="uploadZone">
           <div id="uploadPrompt">
-            <div class="upload-icon">📄</div>
+            <div class="upload-icon">&#128196;</div>
             <div class="upload-title">拖曳回單圖片至此處，或點擊上傳</div>
-            <div class="upload-subtitle">
-              支援 JPG、PNG、WEBP、BMP、HEIC<br/>
-              圖片將透過 AI 進行六項鑑真分析
-            </div>
+            <div class="upload-subtitle">支援 JPG、PNG、WEBP、BMP<br/>純本地分析，圖片不上傳至任何伺服器</div>
             <div class="upload-formats">
-              <span class="fmt-tag">JPG</span>
-              <span class="fmt-tag">PNG</span>
-              <span class="fmt-tag">WEBP</span>
-              <span class="fmt-tag">BMP</span>
-              <span class="fmt-tag">HEIC</span>
+              <span class="fmt-tag">JPG</span><span class="fmt-tag">PNG</span><span class="fmt-tag">WEBP</span><span class="fmt-tag">BMP</span>
             </div>
           </div>
-          <div id="previewWrapper">
-            <img id="previewImg" alt="回單預覽" />
-          </div>
+          <div id="previewWrapper"><img id="previewImg" alt=""/></div>
         </div>
-
         <div class="blacklist-alert" id="blacklistAlert">
-          <span class="alert-icon">🚨</span>
+          <span class="alert-icon">&#128680;</span>
           <div>
-            <div class="blacklist-title">⚠ 高風險審計黑名單觸發</div>
-            <div class="blacklist-items" id="blacklistItems">—</div>
+            <div class="blacklist-title">高風險審計黑名單觸發</div>
+            <div class="blacklist-items" id="blacklistItems"></div>
           </div>
         </div>
-
-        <div style="margin-top:14px;" class="controls-row">
+        <div class="controls-row">
           <button class="btn btn-primary" id="scanBtn" disabled>
             <span class="spinner" id="scanSpinner" style="display:none"></span>
-            <span id="scanBtnText">🔍 開始鑑真分析</span>
+            <span id="scanBtnText">&#128269; 開始鑑真分析</span>
           </button>
-          <button class="btn btn-secondary" id="resetBtn">↺ 重置掃描</button>
-          <button class="btn btn-grid" id="gridToggleBtn">⊞ 格栅輔助</button>
+          <button class="btn btn-secondary" id="resetBtn">&#8635; 重置</button>
+          <button class="btn btn-grid" id="gridToggleBtn">&#8862; 格栅輔助</button>
         </div>
-        <div class="progress-bar" id="progressBar" style="display:none">
-          <div class="progress-fill" id="progressFill"></div>
-        </div>
+        <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
       </div>
     </div>
-
-    <!-- Results Panel -->
     <div class="panel" id="resultsSection">
-      <div class="panel-header">
-        <span class="panel-title">分析結果 · ANALYSIS RESULTS</span>
-      </div>
-      <div id="resultsBody">
-        <div class="results-empty">
-          上傳回單圖片並點擊「開始鑑真分析」<br/>
-          系統將自動完成六項稽核檢測
-        </div>
-      </div>
+      <div class="panel-header"><span class="panel-title">分析結果 &middot; ANALYSIS RESULTS</span></div>
+      <div id="resultsBody"><div class="results-empty">上傳回單圖片並點擊「開始鑑真分析」<br/>系統將自動完成六項本地稽核檢測</div></div>
     </div>
-
   </div>
-
-  <!-- RIGHT COLUMN -->
   <div class="right-col">
-
-    <!-- Risk Score -->
     <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">風險評分 · RISK SCORE</span>
-      </div>
+      <div class="panel-header"><span class="panel-title">風險評分 &middot; RISK SCORE</span></div>
       <div class="risk-meter">
         <div class="risk-label">FORENSIC INTEGRITY INDEX</div>
-        <div class="risk-score" id="riskScore">—</div>
-        <div class="risk-bar-track">
-          <div class="risk-bar-fill" id="riskBar"></div>
-        </div>
+        <div class="risk-score" id="riskScore">&mdash;</div>
+        <div class="risk-bar-track"><div class="risk-bar-fill" id="riskBar"></div></div>
         <div class="risk-verdict" id="riskVerdict" style="color:var(--text-dim)">等待分析中...</div>
       </div>
     </div>
-
-    <!-- Check Items -->
     <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">稽核項目 · CHECK ITEMS</span>
-      </div>
-      <div class="panel-body" style="padding:12px;">
-        <div class="checks-list" id="checksList">
-          <!-- populated by JS -->
-        </div>
-      </div>
+      <div class="panel-header"><span class="panel-title">稽核項目 &middot; CHECK ITEMS</span></div>
+      <div class="panel-body" style="padding:12px;"><div class="checks-list" id="checksList"></div></div>
     </div>
-
-    <!-- Metadata -->
     <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">圖片屬性 · METADATA</span>
-      </div>
+      <div class="panel-header"><span class="panel-title">圖片屬性 &middot; METADATA</span></div>
       <div class="panel-body">
-        <div class="meta-grid" id="metaGrid">
+        <div class="meta-grid">
           <div class="meta-item"><div class="meta-key">STATUS</div><div class="meta-val" id="metaStatus">等待上傳</div></div>
-          <div class="meta-item"><div class="meta-key">FILE SIZE</div><div class="meta-val" id="metaSize">—</div></div>
-          <div class="meta-item"><div class="meta-key">DIMENSIONS</div><div class="meta-val" id="metaDims">—</div></div>
-          <div class="meta-item"><div class="meta-key">FORMAT</div><div class="meta-val" id="metaFmt">—</div></div>
-          <div class="meta-item"><div class="meta-key">LAST MODIFIED</div><div class="meta-val" id="metaMod">—</div></div>
-          <div class="meta-item"><div class="meta-key">COLOR PROFILE</div><div class="meta-val" id="metaColor">—</div></div>
+          <div class="meta-item"><div class="meta-key">FILE SIZE</div><div class="meta-val" id="metaSize">&mdash;</div></div>
+          <div class="meta-item"><div class="meta-key">DIMENSIONS</div><div class="meta-val" id="metaDims">&mdash;</div></div>
+          <div class="meta-item"><div class="meta-key">FORMAT</div><div class="meta-val" id="metaFmt">&mdash;</div></div>
+          <div class="meta-item"><div class="meta-key">LAST MODIFIED</div><div class="meta-val" id="metaMod">&mdash;</div></div>
+          <div class="meta-item"><div class="meta-key">COMPRESSED</div><div class="meta-val" id="metaColor">&mdash;</div></div>
         </div>
       </div>
     </div>
-
   </div>
-
-  <footer>
-    RECEIPT FORENSICS SYSTEM · 回單鑑真系統 · POWERED BY CLAUDE AI · FOR INVESTIGATIVE USE ONLY
-  </footer>
+  <footer>RECEIPT FORENSICS &middot; 回單鑑真系統 &middot; 本地分析模式 &middot; 圖片不離開您的裝置</footer>
 </main>
-
+<div id="todoBanner">
+  <div class="todo-header">
+    <span>&#128203;</span>
+    <span class="todo-title">待辦事項 &middot; TODO</span>
+    <button class="todo-close" id="todoClose">&#10005;</button>
+  </div>
+  <label class="todo-item">
+    <input type="checkbox" id="todo1"/>
+    <span>申請 Anthropic API Key<br/><a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a></span>
+  </label>
+  <label class="todo-item">
+    <input type="checkbox" id="todo2"/>
+    <span>Vercel 設定環境變數<small>ANTHROPIC_API_KEY = sk-ant-...</small></span>
+  </label>
+  <label class="todo-item">
+    <input type="checkbox" id="todo3"/>
+    <span>上傳 api/analyze.js 到 GitHub<small>啟用完整 AI 鑑真模式</small></span>
+  </label>
+  <div class="todo-footer">完成後可享 AI 完整六項鑑真<br/>每張約 $0.003~0.005 USD</div>
+</div>
 <script>
-// ─────────────────────────────────────────────
-// CHECK DEFINITIONS
-// ─────────────────────────────────────────────
-const CHECKS = [
-  { id:'exif',      icon:'🔍', name:'EXIF 黑名單掃描',       detail:'掃描圖片元數據是否含修圖軟體痕跡' },
-  { id:'datetime',  icon:'🕐', name:'日期時間合理性',         detail:'分析回單日期時間是否在合理範圍內' },
-  { id:'splicing',  icon:'🔬', name:'色塊 / 拼貼痕跡',       detail:'分析像素色彩分佈異常區域' },
-  { id:'layout',    icon:'📐', name:'排版間距對齊',           detail:'偵測文字區塊水平對齊一致性' },
-  { id:'pixelcmp',  icon:'🔤', name:'字體像素比對',           detail:'比對圖像不同區域的清晰度一致性' },
-  { id:'fontcons',  icon:'🅰',  name:'字體一致性',             detail:'分析圖像整體字體風格統一程度' },
+var CHECKS=[
+  {id:'exif',icon:'X',name:'EXIF 黑名單掃描',detail:'掃描圖片二進位中的修圖軟體痕跡'},
+  {id:'datetime',icon:'T',name:'日期時間合理性',detail:'分析檔案時間是否在合理範圍內'},
+  {id:'splicing',icon:'S',name:'色塊/拼貼痕跡',detail:'分析像素區塊色彩均一度異常'},
+  {id:'layout',icon:'L',name:'排版對齊分析',detail:'偵測水平亮度帶是否有異常突變'},
+  {id:'pixelcmp',icon:'P',name:'清晰度一致性',detail:'比對圖像不同區域的邊緣清晰度'},
+  {id:'fontcons',icon:'F',name:'字體分佈一致性',detail:'分析深色像素在各欄位的分佈均勻度'}
 ];
+var BLACKLIST=['photoshop','adobe','lightroom','meitu','xingtu','picsart','snapseed','pictureid','thumbnailimage','icc_profile','beautycam','facetune'];
+var currentFile=null,currentImgEl=null,gridActive=false;
 
-const BLACKLIST_KEYWORDS = [
-  'photoshop','adobe','lightroom','meitu','美图','xingtu','醒图',
-  'picsart','snapseed','pictureid','thumbnailimage',
-  '国际照明委员会','国际电工委员会','icc_profile'
-];
+document.getElementById('todoClose').addEventListener('click',function(){document.getElementById('todoBanner').style.display='none';});
+['todo1','todo2','todo3'].forEach(function(id){
+  var el=document.getElementById(id);
+  try{if(localStorage.getItem(id)==='1')el.checked=true;}catch(e){}
+  el.addEventListener('change',function(){try{localStorage.setItem(id,el.checked?'1':'0');}catch(e){}});
+});
 
-// ─────────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────────
-let currentFile = null;
-let currentBase64 = null;
-let currentImgElement = null;
-let gridActive = false;
-
-// ─────────────────────────────────────────────
-// TODO BANNER — API Key 待辦事項
-// ─────────────────────────────────────────────
-function renderTodoBanner() {
-  const banner = document.createElement('div');
-  banner.id = 'todoBanner';
-  banner.style.cssText = `
-    position:fixed; bottom:20px; right:20px; z-index:9000;
-    background:#181c24; border:1px solid rgba(255,228,77,0.4);
-    border-radius:8px; padding:14px 16px; max-width:300px;
-    box-shadow:0 4px 24px rgba(0,0,0,0.5);
-    font-family:'Space Mono',monospace;
-  `;
-  banner.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-      <span style="font-size:16px;">📋</span>
-      <span style="font-size:11px;color:#ffe44d;letter-spacing:0.08em;font-weight:700;">待辦事項 · TODO</span>
-      <button onclick="this.closest('#todoBanner').remove()" style="margin-left:auto;background:none;border:none;color:#5a6a82;cursor:pointer;font-size:14px;">✕</button>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
-        <input type="checkbox" id="todo1" style="margin-top:3px;accent-color:#00e5ff;">
-        <span style="font-size:11px;color:#c8d4e8;line-height:1.5;">
-          申請 Anthropic API Key<br/>
-          <a href="https://console.anthropic.com" target="_blank" style="color:#00e5ff;text-decoration:none;">console.anthropic.com →</a>
-        </span>
-      </label>
-      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
-        <input type="checkbox" id="todo2" style="margin-top:3px;accent-color:#00e5ff;">
-        <span style="font-size:11px;color:#c8d4e8;line-height:1.5;">
-          Vercel 設定環境變數<br/>
-          <span style="color:#5a6a82;">ANTHROPIC_API_KEY = sk-ant-...</span>
-        </span>
-      </label>
-      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
-        <input type="checkbox" id="todo3" style="margin-top:3px;accent-color:#00e5ff;">
-        <span style="font-size:11px;color:#c8d4e8;line-height:1.5;">
-          上傳 api/analyze.js 到 GitHub<br/>
-          <span style="color:#5a6a82;">啟用 AI 完整分析模式</span>
-        </span>
-      </label>
-    </div>
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e2430;font-size:10px;color:#5a6a82;line-height:1.6;">
-      完成後可享完整 AI 六項鑑真<br/>每張約 $0.003~0.005 USD
-    </div>
-  `;
-  document.body.appendChild(banner);
-
-  // Restore checkbox state
-  ['todo1','todo2','todo3'].forEach(id => {
-    const saved = localStorage.getItem(id);
-    if(saved === '1') document.getElementById(id).checked = true;
-    document.getElementById(id).addEventListener('change', e => {
-      localStorage.setItem(id, e.target.checked ? '1' : '0');
-    });
-  });
-}
-renderTodoBanner();
-
-// ─────────────────────────────────────────────
-// INIT CHECKS LIST
-// ─────────────────────────────────────────────
-function initChecks() {
-  const list = document.getElementById('checksList');
-  list.innerHTML = CHECKS.map(c => `
-    <div class="check-item pending" id="chk-${c.id}">
-      <div class="check-icon">${c.icon}</div>
-      <div class="check-content">
-        <div class="check-name">${c.name}</div>
-        <div class="check-detail" id="chk-detail-${c.id}">${c.detail}</div>
-      </div>
-    </div>
-  `).join('');
+function initChecks(){
+  var html='';
+  for(var i=0;i<CHECKS.length;i++){
+    var c=CHECKS[i];
+    html+='<div class="check-item pending" id="chk-'+c.id+'"><div class="check-icon">&#9679;</div><div class="check-content"><div class="check-name">'+c.name+'</div><div class="check-detail" id="chk-detail-'+c.id+'">'+c.detail+'</div></div></div>';
+  }
+  document.getElementById('checksList').innerHTML=html;
 }
 initChecks();
 
-// ─────────────────────────────────────────────
-// UPLOAD HANDLING
-// ─────────────────────────────────────────────
-const uploadZone    = document.getElementById('uploadZone');
-const fileInput     = document.getElementById('fileInput');
-const uploadPrompt  = document.getElementById('uploadPrompt');
-const previewWrapper= document.getElementById('previewWrapper');
-const previewImg    = document.getElementById('previewImg');
-const scanBtn       = document.getElementById('scanBtn');
+var uploadZone=document.getElementById('uploadZone');
+var fileInput=document.getElementById('fileInput');
+var scanBtn=document.getElementById('scanBtn');
 
-uploadZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', e => { if(e.target.files[0]) loadFile(e.target.files[0]); });
-uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
-uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
-uploadZone.addEventListener('drop', e => {
-  e.preventDefault(); uploadZone.classList.remove('dragover');
-  const f = e.dataTransfer.files[0];
-  if(f && f.type.startsWith('image/')) loadFile(f);
+uploadZone.addEventListener('click',function(){fileInput.click();});
+fileInput.addEventListener('change',function(e){if(e.target.files&&e.target.files[0])loadFile(e.target.files[0]);});
+uploadZone.addEventListener('dragover',function(e){e.preventDefault();uploadZone.classList.add('dragover');});
+uploadZone.addEventListener('dragleave',function(){uploadZone.classList.remove('dragover');});
+uploadZone.addEventListener('drop',function(e){
+  e.preventDefault();uploadZone.classList.remove('dragover');
+  var f=e.dataTransfer.files[0];
+  if(f&&f.type.indexOf('image/')===0)loadFile(f);
 });
 
-function loadFile(file) {
-  currentFile = file;
-  const objectUrl = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    currentImgElement = img;
-    const MAX_PX = 1200, QUALITY = 0.85;
-    let w = img.naturalWidth, h = img.naturalHeight;
-    document.getElementById('metaDims').textContent = `${w} × ${h}`;
+function loadFile(file){
+  currentFile=file;
+  var url=URL.createObjectURL(file);
+  var img=new Image();
+  img.onload=function(){
+    currentImgEl=img;
+    var MAX=1200,W=img.naturalWidth,H=img.naturalHeight,dW=W,dH=H;
+    if(W>MAX||H>MAX){var r=Math.min(MAX/W,MAX/H);dW=Math.round(W*r);dH=Math.round(H*r);}
+    var canvas=document.createElement('canvas');
+    canvas.width=dW;canvas.height=dH;
+    var ctx=canvas.getContext('2d');
+    ctx.drawImage(img,0,0,dW,dH);
+    var dataUrl=canvas.toDataURL('image/jpeg',0.85);
 
-    const canvas = document.createElement('canvas');
-    if(w > MAX_PX || h > MAX_PX) {
-      const r = Math.min(MAX_PX/w, MAX_PX/h);
-      w = Math.round(w*r); h = Math.round(h*r);
-    }
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, w, h);
-
-    const compressed = canvas.toDataURL('image/jpeg', QUALITY);
-    currentBase64 = compressed.split(',')[1];
-
-    previewImg.src = compressed;
-    uploadPrompt.style.display = 'none';
-    previewWrapper.classList.add('visible');
+    document.getElementById('previewImg').src=dataUrl;
+    document.getElementById('uploadPrompt').style.display='none';
+    document.getElementById('previewWrapper').classList.add('visible');
     uploadZone.classList.add('has-image');
-    uploadZone.style.padding = '0';
-    scanBtn.disabled = false;
+    uploadZone.style.padding='0';
+    scanBtn.disabled=false;
 
-    const origKB = (file.size/1024).toFixed(0);
-    const compKB = Math.round(currentBase64.length * 0.75 / 1024);
-    const saved  = Math.max(0, Math.round((1 - compKB/origKB)*100));
-    document.getElementById('metaSize').textContent =
-      `${formatBytes(file.size)}${saved>0?' → '+compKB+'KB (-'+saved+'%)':''}`;
+    var origKB=Math.round(file.size/1024);
+    var compKB=Math.round(dataUrl.split(',')[1].length*0.75/1024);
+    var saved=origKB>0?Math.max(0,Math.round((1-compKB/origKB)*100)):0;
 
-    document.getElementById('metaStatus').textContent = '已載入';
-    document.getElementById('metaFmt').textContent = file.type.split('/')[1].toUpperCase();
-    document.getElementById('metaMod').textContent = new Date(file.lastModified).toLocaleString('zh-TW');
-    document.getElementById('metaColor').textContent = `${w}×${h} px`;
+    document.getElementById('metaStatus').textContent='已載入';
+    document.getElementById('metaSize').textContent=formatBytes(file.size);
+    document.getElementById('metaDims').textContent=W+' x '+H;
+    document.getElementById('metaFmt').textContent=(file.type.split('/')[1]||'IMG').toUpperCase();
+    document.getElementById('metaMod').textContent=new Date(file.lastModified).toLocaleString('zh-TW');
+    document.getElementById('metaColor').textContent=compKB+'KB'+(saved>0?' (-'+saved+'%)':'');
 
-    checkBlacklistInFilename(file);
+    chkBlacklist(file);
     resetResults();
-    URL.revokeObjectURL(objectUrl);
+    URL.revokeObjectURL(url);
   };
-  img.src = objectUrl;
+  img.onerror=function(){alert('圖片讀取失敗，請換一張圖片');};
+  img.src=url;
 }
 
-function formatBytes(b) {
-  if(b<1024) return b+' B';
-  if(b<1048576) return (b/1024).toFixed(1)+' KB';
-  return (b/1048576).toFixed(2)+' MB';
+function formatBytes(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';return (b/1048576).toFixed(2)+' MB';}
+
+function chkBlacklist(file){
+  var name=file.name.toLowerCase(),hits=[];
+  for(var i=0;i<BLACKLIST.length;i++){if(name.indexOf(BLACKLIST[i])!==-1)hits.push(BLACKLIST[i]);}
+  if(hits.length>0)showBLAlert(hits);
 }
 
-// ─────────────────────────────────────────────
-// BLACKLIST — filename pre-check
-// ─────────────────────────────────────────────
-function checkBlacklistInFilename(file) {
-  const name = file.name.toLowerCase();
-  const hits = BLACKLIST_KEYWORDS.filter(k => name.includes(k));
-  if(hits.length > 0) showBlacklistAlert(hits);
+function showBLAlert(hits){
+  var html='';
+  for(var i=0;i<hits.length;i++)html+='<span style="color:var(--danger);font-weight:700">['+hits[i].toUpperCase()+']</span> ';
+  document.getElementById('blacklistItems').innerHTML=html;
+  document.getElementById('blacklistAlert').classList.add('visible');
 }
 
-function showBlacklistAlert(hits) {
-  const alert = document.getElementById('blacklistAlert');
-  document.getElementById('blacklistItems').innerHTML =
-    hits.map(h=>`<span style="color:var(--danger);font-weight:700">[${h.toUpperCase()}]</span>`).join(' ');
-  alert.classList.add('visible');
-}
-
-// ─────────────────────────────────────────────
-// RESET
-// ─────────────────────────────────────────────
-document.getElementById('resetBtn').addEventListener('click', resetAll);
-
-function resetAll() {
-  currentFile=null; currentBase64=null; currentImgElement=null;
-  uploadPrompt.style.display='';
-  previewWrapper.classList.remove('visible');
-  previewImg.src='';
+document.getElementById('resetBtn').addEventListener('click',function(){
+  currentFile=null;currentImgEl=null;
+  document.getElementById('uploadPrompt').style.display='';
+  document.getElementById('previewWrapper').classList.remove('visible');
+  document.getElementById('previewImg').src='';
   uploadZone.classList.remove('has-image');
   uploadZone.style.padding='';
   fileInput.value='';
   scanBtn.disabled=true;
   document.getElementById('blacklistAlert').classList.remove('visible');
-  resetResults();
-  ['metaStatus','metaSize','metaDims','metaFmt','metaMod','metaColor'].forEach(id=>{
-    document.getElementById(id).textContent = id==='metaStatus'?'等待上傳':'—';
+  ['metaStatus','metaSize','metaDims','metaFmt','metaMod','metaColor'].forEach(function(id){
+    document.getElementById(id).textContent=id==='metaStatus'?'等待上傳':'—';
   });
-}
+  resetResults();
+});
 
-function resetResults() {
+function resetResults(){
   document.getElementById('riskScore').textContent='—';
   document.getElementById('riskScore').className='risk-score';
   document.getElementById('riskBar').style.width='0%';
   document.getElementById('riskVerdict').textContent='等待分析中...';
   document.getElementById('riskVerdict').style.color='var(--text-dim)';
-  document.getElementById('resultsBody').innerHTML=`
-    <div class="results-empty">上傳回單圖片並點擊「開始鑑真分析」<br/>系統將自動完成本地六項稽核檢測</div>`;
+  document.getElementById('resultsBody').innerHTML='<div class="results-empty">上傳回單圖片並點擊「開始鑑真分析」<br/>系統將自動完成六項本地稽核檢測</div>';
   document.getElementById('progressBar').style.display='none';
   document.getElementById('progressFill').style.width='0%';
   initChecks();
 }
 
-// ─────────────────────────────────────────────
-// GRID TOGGLE
-// ─────────────────────────────────────────────
-document.getElementById('gridToggleBtn').addEventListener('click', () => {
-  gridActive = !gridActive;
-  document.getElementById('gridOverlay').classList.toggle('active', gridActive);
-  document.getElementById('gridToggleBtn').classList.toggle('active', gridActive);
-  document.getElementById('gridToggleBtn').innerHTML = gridActive ? '⊞ 關閉格栅' : '⊞ 格栅輔助';
+document.getElementById('gridToggleBtn').addEventListener('click',function(){
+  gridActive=!gridActive;
+  document.getElementById('gridOverlay').classList.toggle('active',gridActive);
+  this.classList.toggle('active',gridActive);
+  this.textContent=gridActive?'[X] 關閉格栅':'[+] 格栅輔助';
 });
 
-// ─────────────────────────────────────────────
-// SCAN — LOCAL ANALYSIS ENGINE
-// ─────────────────────────────────────────────
-document.getElementById('scanBtn').addEventListener('click', runLocalScan);
+function setProgress(p){document.getElementById('progressFill').style.width=p+'%';}
+function setBox(msg){var el=document.getElementById('streamBox');if(el)el.textContent='> '+msg;}
+function tick(){return new Promise(function(r){setTimeout(r,40);});}
 
-async function runLocalScan() {
-  if(!currentFile || !currentImgElement) return;
-
-  scanBtn.disabled = true;
-  document.getElementById('scanSpinner').style.display = 'flex';
-  document.getElementById('scanBtnText').textContent = '分析中...';
-  document.getElementById('progressBar').style.display = 'block';
-
-  CHECKS.forEach(c => {
-    const el = document.getElementById(`chk-${c.id}`);
-    if(el) el.className = 'check-item running';
-  });
-
-  document.getElementById('resultsBody').innerHTML = `
-    <div class="results-content">
-      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">
-        本地分析中 · LOCAL ANALYSIS
-      </div>
-      <div class="ai-summary" id="streamBox" style="min-height:60px;color:var(--text-dim);">
-        <span style="color:var(--accent)">▍</span> 載入圖片像素資料...
-      </div>
-    </div>`;
-
-  setProgress(5);
-
-  // Draw image to offscreen canvas for pixel analysis
-  const canvas = document.createElement('canvas');
-  const img = currentImgElement;
-  const W = Math.min(img.naturalWidth, 1200);
-  const H = Math.round(img.naturalHeight * (W / img.naturalWidth));
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, W, H);
-  const imageData = ctx.getImageData(0, 0, W, H);
-  const pixels = imageData.data; // RGBA flat array
-
-  setProgress(15);
-  await tick();
-
-  const results = {};
-  const issues = [];
-
-  // ── 1. EXIF / Blacklist ─────────────────────────────────────────────────
-  setStreamBox('掃描 EXIF 黑名單關鍵字...');
-  await tick();
-  const exifResult = await analyzeEXIF(currentFile);
-  results.exif = exifResult;
-  if(exifResult.status !== 'pass') issues.push(exifResult.detail);
-  applyCheckResult('exif', exifResult.status, exifResult.detail);
-  setProgress(28);
-
-  // ── 2. Datetime ─────────────────────────────────────────────────────────
-  setStreamBox('分析日期時間合理性...');
-  await tick();
-  const dtResult = analyzeDatetime(currentFile);
-  results.datetime = dtResult;
-  if(dtResult.status !== 'pass') issues.push(dtResult.detail);
-  applyCheckResult('datetime', dtResult.status, dtResult.detail);
-  setProgress(42);
-
-  // ── 3. Splicing / Color block ────────────────────────────────────────────
-  setStreamBox('掃描色塊與異常像素區域...');
-  await tick();
-  const spliceResult = analyzeSplicing(pixels, W, H);
-  results.splicing = spliceResult;
-  if(spliceResult.status !== 'pass') issues.push(spliceResult.detail);
-  applyCheckResult('splicing', spliceResult.status, spliceResult.detail);
-  setProgress(58);
-
-  // ── 4. Layout alignment ──────────────────────────────────────────────────
-  setStreamBox('偵測水平對齊一致性...');
-  await tick();
-  const layoutResult = analyzeLayout(pixels, W, H);
-  results.layout = layoutResult;
-  if(layoutResult.status !== 'pass') issues.push(layoutResult.detail);
-  applyCheckResult('layout', layoutResult.status, layoutResult.detail);
-  setProgress(72);
-
-  // ── 5. Pixel sharpness comparison ────────────────────────────────────────
-  setStreamBox('比對圖像清晰度一致性...');
-  await tick();
-  const pixResult = analyzePixelSharpness(pixels, W, H);
-  results.pixelcmp = pixResult;
-  if(pixResult.status !== 'pass') issues.push(pixResult.detail);
-  applyCheckResult('pixelcmp', pixResult.status, pixResult.detail);
-  setProgress(86);
-
-  // ── 6. Font consistency (brightness variance) ────────────────────────────
-  setStreamBox('分析字體視覺一致性...');
-  await tick();
-  const fontResult = analyzeFontConsistency(pixels, W, H);
-  results.fontcons = fontResult;
-  if(fontResult.status !== 'pass') issues.push(fontResult.detail);
-  applyCheckResult('fontcons', fontResult.status, fontResult.detail);
-  setProgress(100);
-
-  // ── Final score ──────────────────────────────────────────────────────────
-  const failCount = Object.values(results).filter(r=>r.status==='fail').length;
-  const warnCount = Object.values(results).filter(r=>r.status==='warn').length;
-  const score = Math.min(100, failCount*28 + warnCount*12);
-  const verdict = score >= 55 ? 'FAKE' : score >= 25 ? 'SUSPICIOUS' : 'AUTHENTIC';
-
-  renderFinalResult(score, verdict, issues, results);
-
-  scanBtn.disabled = false;
-  document.getElementById('scanSpinner').style.display = 'none';
-  document.getElementById('scanBtnText').textContent = '🔍 重新分析';
-}
-
-function tick() { return new Promise(r => setTimeout(r, 30)); }
-function setStreamBox(msg) {
-  const el = document.getElementById('streamBox');
-  if(el) el.innerHTML = `<span style="color:var(--accent)">▍</span> ${msg}`;
-}
-function setProgress(pct) {
-  document.getElementById('progressFill').style.width = pct + '%';
-}
-
-// ─────────────────────────────────────────────
-// LOCAL ANALYSIS FUNCTIONS
-// ─────────────────────────────────────────────
-
-// 1. EXIF blacklist — read file bytes for metadata strings
-async function analyzeEXIF(file) {
-  return new Promise(resolve => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const buf = e.target.result;
-      const bytes = new Uint8Array(buf);
-      // Convert first 128KB to string for metadata scanning
-      const limit = Math.min(bytes.length, 131072);
-      let str = '';
-      for(let i=0; i<limit; i++) {
-        if(bytes[i] >= 32 && bytes[i] < 127) str += String.fromCharCode(bytes[i]);
-        else str += ' ';
-      }
-      const strLower = str.toLowerCase();
-      const hits = BLACKLIST_KEYWORDS.filter(k => strLower.includes(k.toLowerCase()));
-
-      // Also check filename
-      const fnHits = BLACKLIST_KEYWORDS.filter(k => file.name.toLowerCase().includes(k.toLowerCase()));
-      const allHits = [...new Set([...hits, ...fnHits])];
-
-      if(allHits.length > 0) {
-        showBlacklistAlert(allHits);
-        resolve({ status:'fail', detail:`⚠ 偵測到高風險關鍵字：${allHits.map(h=>h.toUpperCase()).join('、')}`, hits: allHits });
-      } else {
-        resolve({ status:'pass', detail:'未偵測到修圖軟體關鍵字', hits:[] });
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-// 2. Datetime analysis
-function analyzeDatetime(file) {
-  const modified = new Date(file.lastModified);
-  const now = new Date();
-  const diffDays = (now - modified) / (1000*60*60*24);
-  const hour = modified.getHours();
-  const issues = [];
-
-  if(modified > now) {
-    issues.push('檔案日期為未來時間，異常');
-  }
-  if(diffDays < 0.01) {
-    issues.push('檔案剛建立（數分鐘內），可能為即時製作');
-  }
-  if(hour >= 0 && hour < 6) {
-    issues.push(`修改時間為凌晨 ${hour} 時，非一般銀行營業時段`);
-  }
-
-  if(issues.length >= 2) return { status:'fail', detail: issues.join('；') };
-  if(issues.length === 1) return { status:'warn', detail: issues[0] };
-  return { status:'pass', detail:`檔案時間：${modified.toLocaleString('zh-TW')}，時間合理` };
-}
-
-// 3. Splicing — detect abnormal solid color blocks
-function analyzeSplicing(pixels, W, H) {
-  // Scan for large uniform color rectangles (potential cover-up blocks)
-  const BLOCK = 16;
-  let suspiciousBlocks = 0;
-  const totalBlocks = Math.floor(W/BLOCK) * Math.floor(H/BLOCK);
-
-  for(let by=0; by<Math.floor(H/BLOCK); by++) {
-    for(let bx=0; bx<Math.floor(W/BLOCK); bx++) {
-      let rSum=0, gSum=0, bSum=0, rSqSum=0, gSqSum=0, bSqSum=0;
-      const count = BLOCK*BLOCK;
-      for(let dy=0; dy<BLOCK; dy++) {
-        for(let dx=0; dx<BLOCK; dx++) {
-          const idx = ((by*BLOCK+dy)*W + (bx*BLOCK+dx))*4;
-          const r=pixels[idx], g=pixels[idx+1], b=pixels[idx+2];
-          rSum+=r; gSum+=g; bSum+=b;
-          rSqSum+=r*r; gSqSum+=g*g; bSqSum+=b*b;
-        }
-      }
-      const rVar = rSqSum/count - (rSum/count)**2;
-      const gVar = gSqSum/count - (gSum/count)**2;
-      const bVar = bSqSum/count - (bSum/count)**2;
-      const variance = (rVar+gVar+bVar)/3;
-      // Very low variance = suspiciously uniform block
-      if(variance < 18) suspiciousBlocks++;
-    }
-  }
-
-  const ratio = suspiciousBlocks / totalBlocks;
-  if(ratio > 0.38) return { status:'fail', detail:`偵測到 ${Math.round(ratio*100)}% 的圖像區塊色彩異常均一，疑有色塊遮蓋` };
-  if(ratio > 0.22) return { status:'warn', detail:`${Math.round(ratio*100)}% 區域色彩均一度偏高，建議人工確認` };
-  return { status:'pass', detail:`色塊均一度正常（${Math.round(ratio*100)}%），未發現明顯遮蓋痕跡` };
-}
-
-// 4. Layout — horizontal brightness band analysis
-function analyzeLayout(pixels, W, H) {
-  // Scan horizontal strips for brightness variance
-  const STRIP = Math.max(4, Math.floor(H/40));
-  const stripVars = [];
-
-  for(let y=0; y<H-STRIP; y+=STRIP) {
-    let sum=0, sqSum=0, count=W*STRIP;
-    for(let dy=0; dy<STRIP; dy++) {
-      for(let x=0; x<W; x++) {
-        const idx=((y+dy)*W+x)*4;
-        const lum = 0.299*pixels[idx]+0.587*pixels[idx+1]+0.114*pixels[idx+2];
-        sum+=lum; sqSum+=lum*lum;
-      }
-    }
-    const variance = sqSum/count - (sum/count)**2;
-    stripVars.push(variance);
-  }
-
-  const avgVar = stripVars.reduce((a,b)=>a+b,0) / stripVars.length;
-  const maxVar = Math.max(...stripVars);
-  const ratio = maxVar / (avgVar+1);
-
-  if(ratio > 22) return { status:'fail', detail:`水平帶狀亮度差異過大（比值 ${ratio.toFixed(1)}），可能有文字替換或拼接` };
-  if(ratio > 12) return { status:'warn', detail:`局部水平區域亮度不一致（比值 ${ratio.toFixed(1)}），建議覆核` };
-  return { status:'pass', detail:`水平排版亮度分佈均勻（比值 ${ratio.toFixed(1)}），未見明顯異常` };
-}
-
-// 5. Pixel sharpness — compare top/bottom half Laplacian
-function analyzePixelSharpness(pixels, W, H) {
-  function laplacian(pixels, W, H, y0, y1) {
-    let total = 0, count = 0;
-    for(let y=Math.max(1,y0); y<Math.min(H-1,y1); y++) {
-      for(let x=1; x<W-1; x++) {
-        const lum = (r,g,b) => 0.299*r+0.587*g+0.114*b;
-        const c  = (y*W+x)*4;
-        const t  = ((y-1)*W+x)*4;
-        const bo = ((y+1)*W+x)*4;
-        const l  = (y*W+x-1)*4;
-        const ri = (y*W+x+1)*4;
-        const lap = Math.abs(
-          4*lum(pixels[c],pixels[c+1],pixels[c+2])
-          - lum(pixels[t],pixels[t+1],pixels[t+2])
-          - lum(pixels[bo],pixels[bo+1],pixels[bo+2])
-          - lum(pixels[l],pixels[l+1],pixels[l+2])
-          - lum(pixels[ri],pixels[ri+1],pixels[ri+2])
-        );
-        total += lap; count++;
-      }
-    }
-    return count > 0 ? total/count : 0;
-  }
-
-  const mid = Math.floor(H/2);
-  const topSharp  = laplacian(pixels, W, H, 0, mid);
-  const botSharp  = laplacian(pixels, W, H, mid, H);
-  const ratio = topSharp > 0 ? botSharp/topSharp : 1;
-  const diff  = Math.abs(1 - ratio);
-
-  if(diff > 0.55) return { status:'fail', detail:`上下區域清晰度差異 ${Math.round(diff*100)}%，疑為拼貼截圖合成` };
-  if(diff > 0.28) return { status:'warn', detail:`上下清晰度略有差異（${Math.round(diff*100)}%），建議人工確認` };
-  return { status:'pass', detail:`全圖清晰度一致（差異 ${Math.round(diff*100)}%），未見拼貼跡象` };
-}
-
-// 6. Font consistency — dark pixel cluster variance across columns
-function analyzeFontConsistency(pixels, W, H) {
-  const COLS = 8;
-  const colW  = Math.floor(W/COLS);
-  const darkRatios = [];
-
-  for(let col=0; col<COLS; col++) {
-    let dark=0, total=0;
-    for(let y=0; y<H; y++) {
-      for(let x=col*colW; x<(col+1)*colW && x<W; x++) {
-        const idx=(y*W+x)*4;
-        const lum=0.299*pixels[idx]+0.587*pixels[idx+1]+0.114*pixels[idx+2];
-        if(lum<80) dark++;
-        total++;
-      }
-    }
-    darkRatios.push(dark/total);
-  }
-
-  const avg = darkRatios.reduce((a,b)=>a+b,0)/darkRatios.length;
-  const variance = darkRatios.reduce((s,v)=>s+(v-avg)**2,0)/darkRatios.length;
-  const stdDev = Math.sqrt(variance);
-  const cv = avg > 0 ? stdDev/avg : 0; // coefficient of variation
-
-  if(cv > 1.2) return { status:'fail', detail:`字體深色像素分佈極不均勻（CV=${cv.toFixed(2)}），疑有字體替換` };
-  if(cv > 0.65) return { status:'warn', detail:`字體分佈略有不均（CV=${cv.toFixed(2)}），可能有局部文字修改` };
-  return { status:'pass', detail:`字體像素分佈一致（CV=${cv.toFixed(2)}），視覺風格統一` };
-}
-
-// ─────────────────────────────────────────────
-// RENDER
-// ─────────────────────────────────────────────
-function applyCheckResult(key, status, detail) {
-  const el = document.getElementById(`chk-${key}`);
-  const detailEl = document.getElementById(`chk-detail-${key}`);
-  if(!el) return;
-  let cls='check-item ', icon=CHECKS.find(c=>c.id===key)?.icon||'●';
-  if(status==='pass')      { cls+='pass';      icon='✅'; }
-  else if(status==='fail') { cls+='fail';      icon='🚨'; }
-  else                     { cls+='warn-state';icon='⚠️'; }
+function applyCheck(id,status,detail){
+  var el=document.getElementById('chk-'+id);
+  var de=document.getElementById('chk-detail-'+id);
+  if(!el)return;
+  var icon=status==='pass'?'[OK]':status==='fail'?'[!!]':'[??]';
+  var cls='check-item '+(status==='pass'?'pass':status==='fail'?'fail':'warn-state');
   el.className=cls;
   el.querySelector('.check-icon').textContent=icon;
-  if(detailEl && detail) detailEl.textContent=detail;
+  if(de&&detail)de.textContent=detail;
 }
 
-function renderFinalResult(score, verdict, issues, results) {
-  // Score
-  const scoreEl=document.getElementById('riskScore');
-  scoreEl.textContent=score;
-  scoreEl.className='risk-score '+(score<30?'safe':score<55?'warn':'danger');
+scanBtn.addEventListener('click',function(){
+  if(!currentFile||!currentImgEl)return;
+  scanBtn.disabled=true;
+  document.getElementById('scanSpinner').style.display='flex';
+  document.getElementById('scanBtnText').textContent='分析中...';
+  document.getElementById('progressBar').style.display='block';
+  for(var i=0;i<CHECKS.length;i++){var el=document.getElementById('chk-'+CHECKS[i].id);if(el)el.className='check-item running';}
+  document.getElementById('resultsBody').innerHTML='<div class="results-content"><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">本地分析中 &middot; LOCAL ANALYSIS</div><div class="ai-summary" id="streamBox" style="min-height:60px;color:var(--text-dim);">> 正在讀取圖片...</div></div>';
+  setProgress(5);
 
-  // Bar
-  const bar=document.getElementById('riskBar');
-  bar.style.width=score+'%';
-  bar.style.background=score<30?'var(--safe)':score<55?'var(--warn)':'var(--danger)';
+  var W=Math.min(currentImgEl.naturalWidth,1200);
+  var H=Math.round(currentImgEl.naturalHeight*(W/currentImgEl.naturalWidth));
+  var canvas=document.createElement('canvas');
+  canvas.width=W;canvas.height=H;
+  var ctx=canvas.getContext('2d');
+  ctx.drawImage(currentImgEl,0,0,W,H);
+  var pixels=ctx.getImageData(0,0,W,H).data;
+  var results={},issues=[];
 
-  // Verdict
-  const verdictEl=document.getElementById('riskVerdict');
-  const vm={AUTHENTIC:'✅ 本地分析：回單正常',SUSPICIOUS:'⚠️ 本地分析：存在可疑特徵',FAKE:'🚨 本地分析：高風險，建議人工複審'};
-  const vc={AUTHENTIC:'var(--safe)',SUSPICIOUS:'var(--warn)',FAKE:'var(--danger)'};
-  verdictEl.textContent=vm[verdict]; verdictEl.style.color=vc[verdict];
+  function readBytes(){
+    return new Promise(function(res,rej){
+      var rd=new FileReader();
+      rd.onload=function(e){res(new Uint8Array(e.target.result));};
+      rd.onerror=function(){rej(new Error('讀取失敗'));};
+      rd.readAsArrayBuffer(currentFile);
+    });
+  }
 
-  // Summary
-  const noteStyle='background:rgba(255,228,77,0.07);border:1px solid rgba(255,228,77,0.25);border-radius:6px;padding:12px 14px;margin-top:12px;font-size:11px;color:#ffe44d;line-height:1.7;font-family:var(--font-mono)';
-  const summaryText = issues.length > 0
-    ? `發現 ${issues.length} 項異常：
-${issues.map((v,i)=>`${i+1}. ${v}`).join('
-')}`
-    : '本地分析未發現明顯異常。
-注意：本地分析為像素層級檢測，準確度有限，建議啟用 AI 完整分析模式以獲得更精準的鑑真結果。';
+  function chkEXIF(bytes){
+    var lim=Math.min(bytes.length,131072),str='';
+    for(var i=0;i<lim;i++){var b=bytes[i];str+=(b>=32&&b<127)?String.fromCharCode(b):' ';}
+    var low=str.toLowerCase(),fn=currentFile.name.toLowerCase(),hits=[];
+    for(var j=0;j<BLACKLIST.length;j++){if(low.indexOf(BLACKLIST[j])!==-1||fn.indexOf(BLACKLIST[j])!==-1)hits.push(BLACKLIST[j]);}
+    if(hits.length>0)return{status:'fail',detail:'偵測到高風險關鍵字：'+hits.map(function(h){return h.toUpperCase();}).join('、'),hits:hits};
+    return{status:'pass',detail:'未偵測到修圖軟體關鍵字',hits:[]};
+  }
 
-  document.getElementById('resultsBody').innerHTML=`
-    <div class="results-content">
-      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">
-        本地分析摘要 · LOCAL ANALYSIS RESULT
-      </div>
-      <div class="ai-summary">${escapeHtml(summaryText)}</div>
-      <div style="${noteStyle}">
-        ⚡ 本地模式限制：像素分析無法識別語意、文字內容或字體細節。<br/>
-        完整 AI 鑑真請完成右下角待辦事項以啟用 Claude 分析模式。
-      </div>
-    </div>`;
-}
+  function chkDatetime(){
+    var mod=new Date(currentFile.lastModified),now=new Date(),diffMin=(now-mod)/60000,h=mod.getHours(),issues=[];
+    if(mod>now)issues.push('檔案時間為未來時間，異常');
+    if(diffMin<5)issues.push('檔案於5分鐘內建立，疑為即時製作');
+    if(h>=0&&h<6)issues.push('修改時間為凌晨'+h+'時，非銀行營業時段');
+    if(issues.length>=2)return{status:'fail',detail:issues.join('；')};
+    if(issues.length===1)return{status:'warn',detail:issues[0]};
+    return{status:'pass',detail:'檔案時間：'+mod.toLocaleString('zh-TW')+'，時間合理'};
+  }
 
-function renderError(msg) {
-  document.getElementById('resultsBody').innerHTML=`
-    <div class="results-empty" style="color:var(--danger)">
-      ⚠ 分析失敗<br/><span style="color:var(--text-dim);font-size:11px">${escapeHtml(msg)}</span>
-    </div>`;
-}
+  function chkSplice(){
+    var BS=16,susp=0,tot=Math.floor(W/BS)*Math.floor(H/BS);
+    for(var by=0;by<Math.floor(H/BS);by++){for(var bx=0;bx<Math.floor(W/BS);bx++){
+      var rS=0,gS=0,bS=0,rQ=0,gQ=0,bQ=0,n=BS*BS;
+      for(var dy=0;dy<BS;dy++){for(var dx=0;dx<BS;dx++){
+        var idx=((by*BS+dy)*W+(bx*BS+dx))*4,rv=pixels[idx],gv=pixels[idx+1],bv=pixels[idx+2];
+        rS+=rv;gS+=gv;bS+=bv;rQ+=rv*rv;gQ+=gv*gv;bQ+=bv*bv;
+      }}
+      var v=(rQ/n-(rS/n)*(rS/n)+gQ/n-(gS/n)*(gS/n)+bQ/n-(bS/n)*(bS/n))/3;
+      if(v<18)susp++;
+    }}
+    var r=tot>0?susp/tot:0,pct=Math.round(r*100);
+    if(r>0.38)return{status:'fail',detail:pct+'% 區塊色彩異常均一，疑有色塊遮蓋'};
+    if(r>0.22)return{status:'warn',detail:pct+'% 區域均一度偏高，建議人工確認'};
+    return{status:'pass',detail:'色塊均一度正常（'+pct+'%）'};
+  }
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br/>');
-}
+  function chkLayout(){
+    var ST=Math.max(4,Math.floor(H/40)),vars=[],i;
+    for(var y=0;y<H-ST;y+=ST){var sum=0,sqS=0,cnt=W*ST;
+      for(var dy=0;dy<ST;dy++){for(var x=0;x<W;x++){var idx=((y+dy)*W+x)*4,lum=0.299*pixels[idx]+0.587*pixels[idx+1]+0.114*pixels[idx+2];sum+=lum;sqS+=lum*lum;}}
+      vars.push(sqS/cnt-(sum/cnt)*(sum/cnt));}
+    var avg=0,maxV=0;
+    for(i=0;i<vars.length;i++)avg+=vars[i];
+    avg/=vars.length;
+    for(i=0;i<vars.length;i++)if(vars[i]>maxV)maxV=vars[i];
+    var ratio=avg>0?maxV/(avg+1):0,r=ratio.toFixed(1);
+    if(ratio>22)return{status:'fail',detail:'水平亮度差異過大（比值'+r+'），疑有文字替換'};
+    if(ratio>12)return{status:'warn',detail:'局部水平亮度不一致（比值'+r+'），建議覆核'};
+    return{status:'pass',detail:'水平排版亮度均勻（比值'+r+'）'};
+  }
+
+  function chkSharp(){
+    function lap(y0,y1){var tot=0,cnt=0;
+      for(var y=Math.max(1,y0);y<Math.min(H-1,y1);y++){for(var x=1;x<W-1;x++){
+        var c=(y*W+x)*4,t=((y-1)*W+x)*4,bo=((y+1)*W+x)*4,l=(y*W+x-1)*4,ri=(y*W+x+1)*4;
+        function lm(i){return 0.299*pixels[i]+0.587*pixels[i+1]+0.114*pixels[i+2];}
+        tot+=Math.abs(4*lm(c)-lm(t)-lm(bo)-lm(l)-lm(ri));cnt++;
+      }}return cnt>0?tot/cnt:0;}
+    var mid=Math.floor(H/2),ts=lap(0,mid),bs=lap(mid,H),diff=ts>0?Math.abs(1-bs/ts):0,pct=Math.round(diff*100);
+    if(diff>0.55)return{status:'fail',detail:'上下清晰度差異'+pct+'%，疑為拼貼合成'};
+    if(diff>0.28)return{status:'warn',detail:'上下清晰度略有差異（'+pct+'%）'};
+    return{status:'pass',detail:'全圖清晰度一致（差異'+pct+'%）'};
+  }
+
+  function chkFont(){
+    var COLS=8,cW=Math.floor(W/COLS),ratios=[],i;
+    for(var col=0;col<COLS;col++){var dark=0,tot=0;
+      for(var y=0;y<H;y++){for(var x=col*cW;x<(col+1)*cW&&x<W;x++){var idx=(y*W+x)*4,lum=0.299*pixels[idx]+0.587*pixels[idx+1]+0.114*pixels[idx+2];if(lum<80)dark++;tot++;}}
+      ratios.push(tot>0?dark/tot:0);}
+    var avg=0,vari=0;
+    for(i=0;i<ratios.length;i++)avg+=ratios[i];avg/=ratios.length;
+    for(i=0;i<ratios.length;i++)vari+=(ratios[i]-avg)*(ratios[i]-avg);vari/=ratios.length;
+    var cv=avg>0?Math.sqrt(vari)/avg:0,cvS=cv.toFixed(2);
+    if(cv>1.2)return{status:'fail',detail:'字體深色像素分佈極不均勻（CV='+cvS+'），疑有文字替換'};
+    if(cv>0.65)return{status:'warn',detail:'字體分佈略有不均（CV='+cvS+'）'};
+    return{status:'pass',detail:'字體像素分佈一致（CV='+cvS+'）'};
+  }
+
+  readBytes()
+    .then(function(bytes){
+      setBox('掃描 EXIF 黑名單...');setProgress(15);
+      var r=chkEXIF(bytes);results.exif=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('exif',r.status,r.detail);if(r.hits&&r.hits.length>0)showBLAlert(r.hits);
+      return tick();
+    }).then(function(){
+      setBox('分析日期時間...');setProgress(30);
+      var r=chkDatetime();results.datetime=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('datetime',r.status,r.detail);
+      return tick();
+    }).then(function(){
+      setBox('掃描色塊拼貼痕跡...');setProgress(45);
+      var r=chkSplice();results.splicing=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('splicing',r.status,r.detail);
+      return tick();
+    }).then(function(){
+      setBox('偵測排版對齊...');setProgress(60);
+      var r=chkLayout();results.layout=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('layout',r.status,r.detail);
+      return tick();
+    }).then(function(){
+      setBox('比對清晰度...');setProgress(75);
+      var r=chkSharp();results.pixelcmp=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('pixelcmp',r.status,r.detail);
+      return tick();
+    }).then(function(){
+      setBox('分析字體分佈...');setProgress(90);
+      var r=chkFont();results.fontcons=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('fontcons',r.status,r.detail);
+      return tick();
+    }).then(function(){
+      var failN=0,warnN=0,keys=Object.keys(results);
+      for(var i=0;i<keys.length;i++){if(results[keys[i]].status==='fail')failN++;else if(results[keys[i]].status==='warn')warnN++;}
+      var score=Math.min(100,failN*28+warnN*12);
+      var verdict=score>=55?'FAKE':score>=25?'SUSPICIOUS':'AUTHENTIC';
+
+      var scoreEl=document.getElementById('riskScore');
+      scoreEl.textContent=score;
+      scoreEl.className='risk-score '+(score<30?'safe':score<55?'warn':'danger');
+      var bar=document.getElementById('riskBar');
+      bar.style.width=score+'%';
+      bar.style.background=score<30?'var(--safe)':score<55?'var(--warn)':'var(--danger)';
+      var vEl=document.getElementById('riskVerdict');
+      var vm={AUTHENTIC:'本地分析：回單正常',SUSPICIOUS:'本地分析：存在可疑特徵',FAKE:'本地分析：高風險，建議人工複審'};
+      var vc={AUTHENTIC:'var(--safe)',SUSPICIOUS:'var(--warn)',FAKE:'var(--danger)'};
+      vEl.textContent=vm[verdict];vEl.style.color=vc[verdict];
+
+      var summary=issues.length>0?'發現 '+issues.length+' 項異常：\n'+issues.map(function(v,i){return (i+1)+'. '+v;}).join('\n'):'本地分析未發現明顯異常。\n注意：本地像素分析準確度有限，建議啟用 AI 完整分析模式。';
+      setProgress(100);
+      document.getElementById('resultsBody').innerHTML='<div class="results-content"><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">本地分析摘要</div><div class="ai-summary">'+summary.replace(/\n/g,'<br/>')+'</div><div style="background:rgba(255,228,77,0.07);border:1px solid rgba(255,228,77,0.25);border-radius:6px;padding:12px 14px;margin-top:12px;font-size:11px;color:#ffe44d;line-height:1.7;font-family:var(--font-mono);">本地模式無法識別文字語意。完整 AI 鑑真請完成右下角待辦事項。</div></div>';
+      scanBtn.disabled=false;document.getElementById('scanSpinner').style.display='none';document.getElementById('scanBtnText').textContent='重新分析';
+    }).catch(function(err){
+      document.getElementById('resultsBody').innerHTML='<div class="results-empty" style="color:var(--danger)">分析失敗：'+String(err)+'</div>';
+      scanBtn.disabled=false;document.getElementById('scanSpinner').style.display='none';document.getElementById('scanBtnText').textContent='重新分析';
+    });
+});
 </script>
 </body>
 </html>
