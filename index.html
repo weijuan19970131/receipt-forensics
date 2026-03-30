@@ -189,7 +189,7 @@ var CHECKS=[
   {id:'fontcons',icon:'F',name:'字體分佈一致性',detail:'分析深色像素在各欄位的分佈均勻度'}
 ];
 var BLACKLIST=['photoshop','adobe','lightroom','meitu','xingtu','picsart','snapseed','pictureid','thumbnailimage','icc_profile','beautycam','facetune'];
-var currentFile=null,currentImgEl=null,gridActive=false,exifData=null;
+var currentFile=null,currentImgEl=null,gridActive=false,exifData=null,exifPromise=null;
 
 function initChecks(){
   var html='';
@@ -250,21 +250,18 @@ function loadFile(file){
     chkBlacklist(file);
     resetResults();
     exifData=null;
+    exifPromise=null;
     if(typeof exifr!=='undefined'){
-      exifr.parse(file,{tiff:true,exif:true,iptc:true,icc:true,jfif:true,ihdr:true}).then(function(exif){
+      exifPromise=exifr.parse(file,{tiff:true,exif:true,iptc:true,icc:true,jfif:true,ihdr:true}).then(function(exif){
         exifData=exif||{};
         var sw=exifData.Software||exifData.software||'';
         var dt=exifData.DateTimeOriginal||exifData.DateTime||exifData.CreateDate||'';
         document.getElementById('metaExifSw').textContent=sw||'—';
         document.getElementById('metaExifDt').textContent=dt?new Date(dt).toLocaleString('zh-TW'):'—';
-        // Flag immediately if blacklisted software detected
         if(sw){
           var swLow=sw.toLowerCase();
           for(var i=0;i<BLACKLIST.length;i++){
-            if(swLow.indexOf(BLACKLIST[i])!==-1){
-              showBLAlert([sw]);
-              break;
-            }
+            if(swLow.indexOf(BLACKLIST[i])!==-1){showBLAlert([sw]);break;}
           }
         }
       }).catch(function(){exifData={};});
@@ -358,6 +355,8 @@ scanBtn.addEventListener('click',function(){
   ctx.drawImage(currentImgEl,0,0,W,H);
   var pixels=ctx.getImageData(0,0,W,H).data;
   var results={},issues=[];
+
+  var waitForExif = exifPromise ? exifPromise.catch(function(){}) : Promise.resolve();
 
   function readBytes(){
     return new Promise(function(res,rej){
@@ -502,7 +501,7 @@ scanBtn.addEventListener('click',function(){
     return{status:'pass',detail:'字體像素分佈一致（CV='+cvS+'）'};
   }
 
-  readBytes()
+  waitForExif.then(function(){return readBytes();})
     .then(function(bytes){
       setBox('掃描 EXIF 黑名單...');setProgress(12);
       var r=chkEXIF(bytes);results.exif=r;if(r.status!=='pass')issues.push(r.detail);applyCheck('exif',r.status,r.detail);if(r.hits&&r.hits.length>0)showBLAlert(r.hits);
