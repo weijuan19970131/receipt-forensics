@@ -600,23 +600,86 @@
 // CHECK DEFINITIONS
 // ─────────────────────────────────────────────
 const CHECKS = [
-  { id:'splicing',   icon:'🔬', name:'色塊 / 拼貼 / 重製痕跡', detail:'檢測圖像是否有剪貼、色塊遮蓋或重新製作的跡象' },
-  { id:'layout',     icon:'📐', name:'文字數字排版間距對齊', detail:'檢測文字排版是否規則、數字欄位是否對齊' },
-  { id:'pixelcmp',   icon:'🔤', name:'回單字體像素比對', detail:'比對不同區域的字體像素密度是否一致' },
-  { id:'fontcons',   icon:'🅰', name:'回單字體一致性', detail:'偵測是否有字體混用或非原生字型嵌入' },
-  { id:'blacklist',  icon:'🚨', name:'圖片屬性黑名單檢測', detail:'掃描 EXIF / 元數據是否含高風險軟體痕跡' },
-  { id:'datetime',   icon:'🕐', name:'日期時間吻合度', detail:'比對圖片元數據拍攝時間與回單日期是否一致' },
+  { id:'exif',      icon:'🔍', name:'EXIF 黑名單掃描',       detail:'掃描圖片元數據是否含修圖軟體痕跡' },
+  { id:'datetime',  icon:'🕐', name:'日期時間合理性',         detail:'分析回單日期時間是否在合理範圍內' },
+  { id:'splicing',  icon:'🔬', name:'色塊 / 拼貼痕跡',       detail:'分析像素色彩分佈異常區域' },
+  { id:'layout',    icon:'📐', name:'排版間距對齊',           detail:'偵測文字區塊水平對齊一致性' },
+  { id:'pixelcmp',  icon:'🔤', name:'字體像素比對',           detail:'比對圖像不同區域的清晰度一致性' },
+  { id:'fontcons',  icon:'🅰',  name:'字體一致性',             detail:'分析圖像整體字體風格統一程度' },
 ];
 
-const BLACKLIST_KEYWORDS = ['photoshop','pictureid','adobe','meitu','thumbnailimage',
-  '国际照明委员会 1931','国际电工委员会','xingtu','picsart','美图','lightroom','snapseed'];
+const BLACKLIST_KEYWORDS = [
+  'photoshop','adobe','lightroom','meitu','美图','xingtu','醒图',
+  'picsart','snapseed','pictureid','thumbnailimage',
+  '国际照明委员会','国际电工委员会','icc_profile'
+];
 
 // ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
 let currentFile = null;
 let currentBase64 = null;
+let currentImgElement = null;
 let gridActive = false;
+
+// ─────────────────────────────────────────────
+// TODO BANNER — API Key 待辦事項
+// ─────────────────────────────────────────────
+function renderTodoBanner() {
+  const banner = document.createElement('div');
+  banner.id = 'todoBanner';
+  banner.style.cssText = `
+    position:fixed; bottom:20px; right:20px; z-index:9000;
+    background:#181c24; border:1px solid rgba(255,228,77,0.4);
+    border-radius:8px; padding:14px 16px; max-width:300px;
+    box-shadow:0 4px 24px rgba(0,0,0,0.5);
+    font-family:'Space Mono',monospace;
+  `;
+  banner.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <span style="font-size:16px;">📋</span>
+      <span style="font-size:11px;color:#ffe44d;letter-spacing:0.08em;font-weight:700;">待辦事項 · TODO</span>
+      <button onclick="this.closest('#todoBanner').remove()" style="margin-left:auto;background:none;border:none;color:#5a6a82;cursor:pointer;font-size:14px;">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="todo1" style="margin-top:3px;accent-color:#00e5ff;">
+        <span style="font-size:11px;color:#c8d4e8;line-height:1.5;">
+          申請 Anthropic API Key<br/>
+          <a href="https://console.anthropic.com" target="_blank" style="color:#00e5ff;text-decoration:none;">console.anthropic.com →</a>
+        </span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="todo2" style="margin-top:3px;accent-color:#00e5ff;">
+        <span style="font-size:11px;color:#c8d4e8;line-height:1.5;">
+          Vercel 設定環境變數<br/>
+          <span style="color:#5a6a82;">ANTHROPIC_API_KEY = sk-ant-...</span>
+        </span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="todo3" style="margin-top:3px;accent-color:#00e5ff;">
+        <span style="font-size:11px;color:#c8d4e8;line-height:1.5;">
+          上傳 api/analyze.js 到 GitHub<br/>
+          <span style="color:#5a6a82;">啟用 AI 完整分析模式</span>
+        </span>
+      </label>
+    </div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e2430;font-size:10px;color:#5a6a82;line-height:1.6;">
+      完成後可享完整 AI 六項鑑真<br/>每張約 $0.003~0.005 USD
+    </div>
+  `;
+  document.body.appendChild(banner);
+
+  // Restore checkbox state
+  ['todo1','todo2','todo3'].forEach(id => {
+    const saved = localStorage.getItem(id);
+    if(saved === '1') document.getElementById(id).checked = true;
+    document.getElementById(id).addEventListener('change', e => {
+      localStorage.setItem(id, e.target.checked ? '1' : '0');
+    });
+  });
+}
+renderTodoBanner();
 
 // ─────────────────────────────────────────────
 // INIT CHECKS LIST
@@ -638,16 +701,15 @@ initChecks();
 // ─────────────────────────────────────────────
 // UPLOAD HANDLING
 // ─────────────────────────────────────────────
-const uploadZone = document.getElementById('uploadZone');
-const fileInput  = document.getElementById('fileInput');
-const uploadPrompt = document.getElementById('uploadPrompt');
-const previewWrapper = document.getElementById('previewWrapper');
-const previewImg = document.getElementById('previewImg');
-const scanBtn = document.getElementById('scanBtn');
+const uploadZone    = document.getElementById('uploadZone');
+const fileInput     = document.getElementById('fileInput');
+const uploadPrompt  = document.getElementById('uploadPrompt');
+const previewWrapper= document.getElementById('previewWrapper');
+const previewImg    = document.getElementById('previewImg');
+const scanBtn       = document.getElementById('scanBtn');
 
 uploadZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => { if(e.target.files[0]) loadFile(e.target.files[0]); });
-
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
 uploadZone.addEventListener('drop', e => {
@@ -658,22 +720,19 @@ uploadZone.addEventListener('drop', e => {
 
 function loadFile(file) {
   currentFile = file;
-  const img = new Image();
   const objectUrl = URL.createObjectURL(file);
+  const img = new Image();
   img.onload = () => {
-    // ── Auto-compress before storing as base64 ──
-    const MAX_PX = 1200;
-    const QUALITY = 0.82;
-    let { width: w, height: h } = img;
+    currentImgElement = img;
+    const MAX_PX = 1200, QUALITY = 0.85;
+    let w = img.naturalWidth, h = img.naturalHeight;
     document.getElementById('metaDims').textContent = `${w} × ${h}`;
 
-    if (w > MAX_PX || h > MAX_PX) {
-      const ratio = Math.min(MAX_PX / w, MAX_PX / h);
-      w = Math.round(w * ratio);
-      h = Math.round(h * ratio);
-    }
-
     const canvas = document.createElement('canvas');
+    if(w > MAX_PX || h > MAX_PX) {
+      const r = Math.min(MAX_PX/w, MAX_PX/h);
+      w = Math.round(w*r); h = Math.round(h*r);
+    }
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0, w, h);
@@ -681,7 +740,6 @@ function loadFile(file) {
     const compressed = canvas.toDataURL('image/jpeg', QUALITY);
     currentBase64 = compressed.split(',')[1];
 
-    // Show compressed preview
     previewImg.src = compressed;
     uploadPrompt.style.display = 'none';
     previewWrapper.classList.add('visible');
@@ -689,15 +747,17 @@ function loadFile(file) {
     uploadZone.style.padding = '0';
     scanBtn.disabled = false;
 
-    // Show original vs compressed size
-    const origKB = (file.size / 1024).toFixed(0);
+    const origKB = (file.size/1024).toFixed(0);
     const compKB = Math.round(currentBase64.length * 0.75 / 1024);
-    const saved = Math.max(0, Math.round((1 - compKB / origKB) * 100));
+    const saved  = Math.max(0, Math.round((1 - compKB/origKB)*100));
     document.getElementById('metaSize').textContent =
-      `${formatBytes(file.size)} → ${compKB}KB${saved > 0 ? ' (-' + saved + '%)' : ''}`;
-    document.getElementById('metaDims').textContent = `${img.naturalWidth}×${img.naturalHeight} → ${w}×${h}`;
+      `${formatBytes(file.size)}${saved>0?' → '+compKB+'KB (-'+saved+'%)':''}`;
 
-    updateMetadata(file, compressed);
+    document.getElementById('metaStatus').textContent = '已載入';
+    document.getElementById('metaFmt').textContent = file.type.split('/')[1].toUpperCase();
+    document.getElementById('metaMod').textContent = new Date(file.lastModified).toLocaleString('zh-TW');
+    document.getElementById('metaColor').textContent = `${w}×${h} px`;
+
     checkBlacklistInFilename(file);
     resetResults();
     URL.revokeObjectURL(objectUrl);
@@ -705,22 +765,14 @@ function loadFile(file) {
   img.src = objectUrl;
 }
 
-function updateMetadata(file, dataUrl) {
-  document.getElementById('metaStatus').textContent = '已載入';
-  document.getElementById('metaSize').textContent = formatBytes(file.size);
-  document.getElementById('metaFmt').textContent = file.type.split('/')[1].toUpperCase();
-  document.getElementById('metaMod').textContent = new Date(file.lastModified).toLocaleString('zh-TW');
-  document.getElementById('metaColor').textContent = '分析中...';
-}
-
 function formatBytes(b) {
-  if(b < 1024) return b + ' B';
-  if(b < 1048576) return (b/1024).toFixed(1) + ' KB';
-  return (b/1048576).toFixed(2) + ' MB';
+  if(b<1024) return b+' B';
+  if(b<1048576) return (b/1024).toFixed(1)+' KB';
+  return (b/1048576).toFixed(2)+' MB';
 }
 
 // ─────────────────────────────────────────────
-// BLACKLIST (filename check before AI)
+// BLACKLIST — filename pre-check
 // ─────────────────────────────────────────────
 function checkBlacklistInFilename(file) {
   const name = file.name.toLowerCase();
@@ -730,9 +782,8 @@ function checkBlacklistInFilename(file) {
 
 function showBlacklistAlert(hits) {
   const alert = document.getElementById('blacklistAlert');
-  document.getElementById('blacklistItems').innerHTML = hits.map(h =>
-    `<span style="color:var(--danger);font-weight:700">[${h.toUpperCase()}]</span>`
-  ).join(' ');
+  document.getElementById('blacklistItems').innerHTML =
+    hits.map(h=>`<span style="color:var(--danger);font-weight:700">[${h.toUpperCase()}]</span>`).join(' ');
   alert.classList.add('visible');
 }
 
@@ -742,32 +793,31 @@ function showBlacklistAlert(hits) {
 document.getElementById('resetBtn').addEventListener('click', resetAll);
 
 function resetAll() {
-  currentFile = null; currentBase64 = null;
-  uploadPrompt.style.display = '';
+  currentFile=null; currentBase64=null; currentImgElement=null;
+  uploadPrompt.style.display='';
   previewWrapper.classList.remove('visible');
-  previewImg.src = '';
+  previewImg.src='';
   uploadZone.classList.remove('has-image');
-  uploadZone.style.padding = '';
-  fileInput.value = '';
-  scanBtn.disabled = true;
+  uploadZone.style.padding='';
+  fileInput.value='';
+  scanBtn.disabled=true;
   document.getElementById('blacklistAlert').classList.remove('visible');
   resetResults();
-  ['metaStatus','metaSize','metaDims','metaFmt','metaMod','metaColor'].forEach(id => {
+  ['metaStatus','metaSize','metaDims','metaFmt','metaMod','metaColor'].forEach(id=>{
     document.getElementById(id).textContent = id==='metaStatus'?'等待上傳':'—';
   });
-  document.body.classList.remove('scanning');
 }
 
 function resetResults() {
-  document.getElementById('riskScore').textContent = '—';
-  document.getElementById('riskScore').className = 'risk-score';
-  document.getElementById('riskBar').style.width = '0%';
-  document.getElementById('riskVerdict').textContent = '等待分析中...';
-  document.getElementById('riskVerdict').style.color = 'var(--text-dim)';
-  document.getElementById('resultsBody').innerHTML = `
-    <div class="results-empty">上傳回單圖片並點擊「開始鑑真分析」<br/>系統將自動完成六項稽核檢測</div>`;
-  document.getElementById('progressBar').style.display = 'none';
-  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('riskScore').textContent='—';
+  document.getElementById('riskScore').className='risk-score';
+  document.getElementById('riskBar').style.width='0%';
+  document.getElementById('riskVerdict').textContent='等待分析中...';
+  document.getElementById('riskVerdict').style.color='var(--text-dim)';
+  document.getElementById('resultsBody').innerHTML=`
+    <div class="results-empty">上傳回單圖片並點擊「開始鑑真分析」<br/>系統將自動完成本地六項稽核檢測</div>`;
+  document.getElementById('progressBar').style.display='none';
+  document.getElementById('progressFill').style.width='0%';
   initChecks();
 }
 
@@ -782,17 +832,16 @@ document.getElementById('gridToggleBtn').addEventListener('click', () => {
 });
 
 // ─────────────────────────────────────────────
-// SCAN
+// SCAN — LOCAL ANALYSIS ENGINE
 // ─────────────────────────────────────────────
-document.getElementById('scanBtn').addEventListener('click', runScan);
+document.getElementById('scanBtn').addEventListener('click', runLocalScan);
 
-async function runScan() {
-  if(!currentBase64) return;
+async function runLocalScan() {
+  if(!currentFile || !currentImgElement) return;
 
   scanBtn.disabled = true;
   document.getElementById('scanSpinner').style.display = 'flex';
   document.getElementById('scanBtnText').textContent = '分析中...';
-  document.body.classList.add('scanning');
   document.getElementById('progressBar').style.display = 'block';
 
   CHECKS.forEach(c => {
@@ -800,218 +849,361 @@ async function runScan() {
     if(el) el.className = 'check-item running';
   });
 
-  // Show live stream box immediately
   document.getElementById('resultsBody').innerHTML = `
     <div class="results-content">
       <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">
-        AI 即時分析中 · LIVE ANALYSIS
+        本地分析中 · LOCAL ANALYSIS
       </div>
-      <div class="ai-summary" id="streamBox" style="min-height:80px;color:var(--text-dim);">
-        <span style="color:var(--accent)">▍</span> 正在解讀圖片...
+      <div class="ai-summary" id="streamBox" style="min-height:60px;color:var(--text-dim);">
+        <span style="color:var(--accent)">▍</span> 載入圖片像素資料...
       </div>
     </div>`;
 
-  setProgress(10);
+  setProgress(5);
 
-  try {
-    const response = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 600,
-        stream: true,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: currentFile.type || 'image/jpeg', data: currentBase64 } },
-            { type: 'text', text: buildPrompt() }
-          ]
-        }]
-      })
-    });
+  // Draw image to offscreen canvas for pixel analysis
+  const canvas = document.createElement('canvas');
+  const img = currentImgElement;
+  const W = Math.min(img.naturalWidth, 1200);
+  const H = Math.round(img.naturalHeight * (W / img.naturalWidth));
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, W, H);
+  const imageData = ctx.getImageData(0, 0, W, H);
+  const pixels = imageData.data; // RGBA flat array
 
-    if(!response.ok) throw new Error(`API 錯誤 ${response.status}`);
+  setProgress(15);
+  await tick();
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let accumulated = '';
-    let lastRevealTime = 0;
-    const revealed = new Set();
+  const results = {};
+  const issues = [];
 
-    // Status messages shown in stream box during analysis
-    const statusMessages = [
-      '正在解讀圖片結構...',
-      '掃描色塊與拼貼痕跡...',
-      '比對文字排版與間距...',
-      '分析字體像素一致性...',
-      '搜尋黑名單關鍵字...',
-      '驗證日期時間合理性...',
-      '彙整分析結果...'
-    ];
-    let msgIdx = 0;
-    const msgInterval = setInterval(() => {
-      const box = document.getElementById('streamBox');
-      if(box && msgIdx < statusMessages.length) {
-        box.innerHTML = `<span style="color:var(--accent)">▍</span> ${statusMessages[msgIdx++]}`;
-      } else { clearInterval(msgInterval); }
-    }, 2200);
+  // ── 1. EXIF / Blacklist ─────────────────────────────────────────────────
+  setStreamBox('掃描 EXIF 黑名單關鍵字...');
+  await tick();
+  const exifResult = await analyzeEXIF(currentFile);
+  results.exif = exifResult;
+  if(exifResult.status !== 'pass') issues.push(exifResult.detail);
+  applyCheckResult('exif', exifResult.status, exifResult.detail);
+  setProgress(28);
 
-    while(true) {
-      const { done, value } = await reader.read();
-      if(done) break;
+  // ── 2. Datetime ─────────────────────────────────────────────────────────
+  setStreamBox('分析日期時間合理性...');
+  await tick();
+  const dtResult = analyzeDatetime(currentFile);
+  results.datetime = dtResult;
+  if(dtResult.status !== 'pass') issues.push(dtResult.detail);
+  applyCheckResult('datetime', dtResult.status, dtResult.detail);
+  setProgress(42);
 
-      const chunk = decoder.decode(value, { stream: true });
-      for(const line of chunk.split('\n')) {
-        if(!line.startsWith('data: ')) continue;
-        const data = line.slice(6).trim();
-        if(data === '[DONE]') break;
-        try {
-          const evt = JSON.parse(data);
-          if(evt.type === 'content_block_delta' && evt.delta?.text) {
-            accumulated += evt.delta.text;
-            const progress = Math.min(88, 15 + accumulated.length / 10);
-            setProgress(progress);
+  // ── 3. Splicing / Color block ────────────────────────────────────────────
+  setStreamBox('掃描色塊與異常像素區域...');
+  await tick();
+  const spliceResult = analyzeSplicing(pixels, W, H);
+  results.splicing = spliceResult;
+  if(spliceResult.status !== 'pass') issues.push(spliceResult.detail);
+  applyCheckResult('splicing', spliceResult.status, spliceResult.detail);
+  setProgress(58);
 
-            // Attempt to reveal individual checks as their JSON streams in
-            const now = Date.now();
-            if(now - lastRevealTime > 250) {
-              lastRevealTime = now;
-              tryRevealChecks(accumulated, revealed);
-            }
-          }
-        } catch(e) { /* skip malformed SSE line */ }
-      }
-    }
+  // ── 4. Layout alignment ──────────────────────────────────────────────────
+  setStreamBox('偵測水平對齊一致性...');
+  await tick();
+  const layoutResult = analyzeLayout(pixels, W, H);
+  results.layout = layoutResult;
+  if(layoutResult.status !== 'pass') issues.push(layoutResult.detail);
+  applyCheckResult('layout', layoutResult.status, layoutResult.detail);
+  setProgress(72);
 
-    clearInterval(msgInterval);
-    setProgress(95);
+  // ── 5. Pixel sharpness comparison ────────────────────────────────────────
+  setStreamBox('比對圖像清晰度一致性...');
+  await tick();
+  const pixResult = analyzePixelSharpness(pixels, W, H);
+  results.pixelcmp = pixResult;
+  if(pixResult.status !== 'pass') issues.push(pixResult.detail);
+  applyCheckResult('pixelcmp', pixResult.status, pixResult.detail);
+  setProgress(86);
 
-    let result;
-    try {
-      const cleaned = accumulated.replace(/```json|```/g,'').trim();
-      result = JSON.parse(cleaned);
-    } catch(e) {
-      throw new Error('AI 回傳格式錯誤，請重試');
-    }
+  // ── 6. Font consistency (brightness variance) ────────────────────────────
+  setStreamBox('分析字體視覺一致性...');
+  await tick();
+  const fontResult = analyzeFontConsistency(pixels, W, H);
+  results.fontcons = fontResult;
+  if(fontResult.status !== 'pass') issues.push(fontResult.detail);
+  applyCheckResult('fontcons', fontResult.status, fontResult.detail);
+  setProgress(100);
 
-    setProgress(100);
-    renderResults(result);
+  // ── Final score ──────────────────────────────────────────────────────────
+  const failCount = Object.values(results).filter(r=>r.status==='fail').length;
+  const warnCount = Object.values(results).filter(r=>r.status==='warn').length;
+  const score = Math.min(100, failCount*28 + warnCount*12);
+  const verdict = score >= 55 ? 'FAKE' : score >= 25 ? 'SUSPICIOUS' : 'AUTHENTIC';
 
-  } catch(err) {
-    renderError(err.message);
-  } finally {
-    scanBtn.disabled = false;
-    document.getElementById('scanSpinner').style.display = 'none';
-    document.getElementById('scanBtnText').textContent = '🔍 重新分析';
-    document.body.classList.remove('scanning');
-  }
+  renderFinalResult(score, verdict, issues, results);
+
+  scanBtn.disabled = false;
+  document.getElementById('scanSpinner').style.display = 'none';
+  document.getElementById('scanBtnText').textContent = '🔍 重新分析';
 }
 
-// Progressively reveal check results as JSON fragments arrive in stream
-function tryRevealChecks(accumulated, revealed) {
-  const keys = ['splicing','layout','pixelcmp','fontcons','blacklist','datetime'];
-  for(const key of keys) {
-    if(revealed.has(key)) continue;
-    const re = new RegExp('"' + key + '"\\s*:\\s*\\{[^}]*?"status"\\s*:\\s*"(pass|warn|fail)"[^}]*?"detail"\\s*:\\s*"([^"]*)"');
-    const m = accumulated.match(re);
-    if(m) {
-      revealed.add(key);
-      applyCheckResult(key, m[1], m[2]);
-    }
-  }
+function tick() { return new Promise(r => setTimeout(r, 30)); }
+function setStreamBox(msg) {
+  const el = document.getElementById('streamBox');
+  if(el) el.innerHTML = `<span style="color:var(--accent)">▍</span> ${msg}`;
 }
-
-function applyCheckResult(key, status, detail) {
-  const el = document.getElementById(`chk-${key}`);
-  const detailEl = document.getElementById(`chk-detail-${key}`);
-  if(!el) return;
-  let cls = 'check-item ';
-  let icon = CHECKS.find(c=>c.id===key)?.icon || '●';
-  if(status==='pass')      { cls+='pass';       icon='✅'; }
-  else if(status==='fail') { cls+='fail';        icon='🚨'; }
-  else                     { cls+='warn-state';  icon='⚠️'; }
-  el.className = cls;
-  el.querySelector('.check-icon').textContent = icon;
-  if(detailEl && detail) detailEl.textContent = detail;
-}
-
 function setProgress(pct) {
   document.getElementById('progressFill').style.width = pct + '%';
 }
 
-function buildPrompt() {
-  return `回單鑑真分析師。分析圖片，僅輸出純JSON，無其他文字：
-{"riskScore":<0-100>,"verdict":"<AUTHENTIC|SUSPICIOUS|FAKE>","verdictText":"<15字內>","colorProfile":"<色彩空間>","checks":{"splicing":{"status":"<pass|warn|fail>","detail":"<30字內>"},"layout":{"status":"<pass|warn|fail>","detail":"<30字內>"},"pixelcmp":{"status":"<pass|warn|fail>","detail":"<30字內>"},"fontcons":{"status":"<pass|warn|fail>","detail":"<30字內>"},"blacklist":{"status":"<pass|warn|fail>","detail":"<30字內>","hits":[]},"datetime":{"status":"<pass|warn|fail>","detail":"<30字內>"}},"summary":"<80字內總結，繁體中文>"}
-檢測：1.色塊拼貼重製 2.排版間距對齊 3.字體像素一致 4.字體統一 5.黑名單(PS/Adobe/Meitu/美圖/Xingtu/PicsArt) 6.日期時間合理性。繁體中文回答。`;
+// ─────────────────────────────────────────────
+// LOCAL ANALYSIS FUNCTIONS
+// ─────────────────────────────────────────────
+
+// 1. EXIF blacklist — read file bytes for metadata strings
+async function analyzeEXIF(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const buf = e.target.result;
+      const bytes = new Uint8Array(buf);
+      // Convert first 128KB to string for metadata scanning
+      const limit = Math.min(bytes.length, 131072);
+      let str = '';
+      for(let i=0; i<limit; i++) {
+        if(bytes[i] >= 32 && bytes[i] < 127) str += String.fromCharCode(bytes[i]);
+        else str += ' ';
+      }
+      const strLower = str.toLowerCase();
+      const hits = BLACKLIST_KEYWORDS.filter(k => strLower.includes(k.toLowerCase()));
+
+      // Also check filename
+      const fnHits = BLACKLIST_KEYWORDS.filter(k => file.name.toLowerCase().includes(k.toLowerCase()));
+      const allHits = [...new Set([...hits, ...fnHits])];
+
+      if(allHits.length > 0) {
+        showBlacklistAlert(allHits);
+        resolve({ status:'fail', detail:`⚠ 偵測到高風險關鍵字：${allHits.map(h=>h.toUpperCase()).join('、')}`, hits: allHits });
+      } else {
+        resolve({ status:'pass', detail:'未偵測到修圖軟體關鍵字', hits:[] });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// 2. Datetime analysis
+function analyzeDatetime(file) {
+  const modified = new Date(file.lastModified);
+  const now = new Date();
+  const diffDays = (now - modified) / (1000*60*60*24);
+  const hour = modified.getHours();
+  const issues = [];
+
+  if(modified > now) {
+    issues.push('檔案日期為未來時間，異常');
+  }
+  if(diffDays < 0.01) {
+    issues.push('檔案剛建立（數分鐘內），可能為即時製作');
+  }
+  if(hour >= 0 && hour < 6) {
+    issues.push(`修改時間為凌晨 ${hour} 時，非一般銀行營業時段`);
+  }
+
+  if(issues.length >= 2) return { status:'fail', detail: issues.join('；') };
+  if(issues.length === 1) return { status:'warn', detail: issues[0] };
+  return { status:'pass', detail:`檔案時間：${modified.toLocaleString('zh-TW')}，時間合理` };
+}
+
+// 3. Splicing — detect abnormal solid color blocks
+function analyzeSplicing(pixels, W, H) {
+  // Scan for large uniform color rectangles (potential cover-up blocks)
+  const BLOCK = 16;
+  let suspiciousBlocks = 0;
+  const totalBlocks = Math.floor(W/BLOCK) * Math.floor(H/BLOCK);
+
+  for(let by=0; by<Math.floor(H/BLOCK); by++) {
+    for(let bx=0; bx<Math.floor(W/BLOCK); bx++) {
+      let rSum=0, gSum=0, bSum=0, rSqSum=0, gSqSum=0, bSqSum=0;
+      const count = BLOCK*BLOCK;
+      for(let dy=0; dy<BLOCK; dy++) {
+        for(let dx=0; dx<BLOCK; dx++) {
+          const idx = ((by*BLOCK+dy)*W + (bx*BLOCK+dx))*4;
+          const r=pixels[idx], g=pixels[idx+1], b=pixels[idx+2];
+          rSum+=r; gSum+=g; bSum+=b;
+          rSqSum+=r*r; gSqSum+=g*g; bSqSum+=b*b;
+        }
+      }
+      const rVar = rSqSum/count - (rSum/count)**2;
+      const gVar = gSqSum/count - (gSum/count)**2;
+      const bVar = bSqSum/count - (bSum/count)**2;
+      const variance = (rVar+gVar+bVar)/3;
+      // Very low variance = suspiciously uniform block
+      if(variance < 18) suspiciousBlocks++;
+    }
+  }
+
+  const ratio = suspiciousBlocks / totalBlocks;
+  if(ratio > 0.38) return { status:'fail', detail:`偵測到 ${Math.round(ratio*100)}% 的圖像區塊色彩異常均一，疑有色塊遮蓋` };
+  if(ratio > 0.22) return { status:'warn', detail:`${Math.round(ratio*100)}% 區域色彩均一度偏高，建議人工確認` };
+  return { status:'pass', detail:`色塊均一度正常（${Math.round(ratio*100)}%），未發現明顯遮蓋痕跡` };
+}
+
+// 4. Layout — horizontal brightness band analysis
+function analyzeLayout(pixels, W, H) {
+  // Scan horizontal strips for brightness variance
+  const STRIP = Math.max(4, Math.floor(H/40));
+  const stripVars = [];
+
+  for(let y=0; y<H-STRIP; y+=STRIP) {
+    let sum=0, sqSum=0, count=W*STRIP;
+    for(let dy=0; dy<STRIP; dy++) {
+      for(let x=0; x<W; x++) {
+        const idx=((y+dy)*W+x)*4;
+        const lum = 0.299*pixels[idx]+0.587*pixels[idx+1]+0.114*pixels[idx+2];
+        sum+=lum; sqSum+=lum*lum;
+      }
+    }
+    const variance = sqSum/count - (sum/count)**2;
+    stripVars.push(variance);
+  }
+
+  const avgVar = stripVars.reduce((a,b)=>a+b,0) / stripVars.length;
+  const maxVar = Math.max(...stripVars);
+  const ratio = maxVar / (avgVar+1);
+
+  if(ratio > 22) return { status:'fail', detail:`水平帶狀亮度差異過大（比值 ${ratio.toFixed(1)}），可能有文字替換或拼接` };
+  if(ratio > 12) return { status:'warn', detail:`局部水平區域亮度不一致（比值 ${ratio.toFixed(1)}），建議覆核` };
+  return { status:'pass', detail:`水平排版亮度分佈均勻（比值 ${ratio.toFixed(1)}），未見明顯異常` };
+}
+
+// 5. Pixel sharpness — compare top/bottom half Laplacian
+function analyzePixelSharpness(pixels, W, H) {
+  function laplacian(pixels, W, H, y0, y1) {
+    let total = 0, count = 0;
+    for(let y=Math.max(1,y0); y<Math.min(H-1,y1); y++) {
+      for(let x=1; x<W-1; x++) {
+        const lum = (r,g,b) => 0.299*r+0.587*g+0.114*b;
+        const c  = (y*W+x)*4;
+        const t  = ((y-1)*W+x)*4;
+        const bo = ((y+1)*W+x)*4;
+        const l  = (y*W+x-1)*4;
+        const ri = (y*W+x+1)*4;
+        const lap = Math.abs(
+          4*lum(pixels[c],pixels[c+1],pixels[c+2])
+          - lum(pixels[t],pixels[t+1],pixels[t+2])
+          - lum(pixels[bo],pixels[bo+1],pixels[bo+2])
+          - lum(pixels[l],pixels[l+1],pixels[l+2])
+          - lum(pixels[ri],pixels[ri+1],pixels[ri+2])
+        );
+        total += lap; count++;
+      }
+    }
+    return count > 0 ? total/count : 0;
+  }
+
+  const mid = Math.floor(H/2);
+  const topSharp  = laplacian(pixels, W, H, 0, mid);
+  const botSharp  = laplacian(pixels, W, H, mid, H);
+  const ratio = topSharp > 0 ? botSharp/topSharp : 1;
+  const diff  = Math.abs(1 - ratio);
+
+  if(diff > 0.55) return { status:'fail', detail:`上下區域清晰度差異 ${Math.round(diff*100)}%，疑為拼貼截圖合成` };
+  if(diff > 0.28) return { status:'warn', detail:`上下清晰度略有差異（${Math.round(diff*100)}%），建議人工確認` };
+  return { status:'pass', detail:`全圖清晰度一致（差異 ${Math.round(diff*100)}%），未見拼貼跡象` };
+}
+
+// 6. Font consistency — dark pixel cluster variance across columns
+function analyzeFontConsistency(pixels, W, H) {
+  const COLS = 8;
+  const colW  = Math.floor(W/COLS);
+  const darkRatios = [];
+
+  for(let col=0; col<COLS; col++) {
+    let dark=0, total=0;
+    for(let y=0; y<H; y++) {
+      for(let x=col*colW; x<(col+1)*colW && x<W; x++) {
+        const idx=(y*W+x)*4;
+        const lum=0.299*pixels[idx]+0.587*pixels[idx+1]+0.114*pixels[idx+2];
+        if(lum<80) dark++;
+        total++;
+      }
+    }
+    darkRatios.push(dark/total);
+  }
+
+  const avg = darkRatios.reduce((a,b)=>a+b,0)/darkRatios.length;
+  const variance = darkRatios.reduce((s,v)=>s+(v-avg)**2,0)/darkRatios.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = avg > 0 ? stdDev/avg : 0; // coefficient of variation
+
+  if(cv > 1.2) return { status:'fail', detail:`字體深色像素分佈極不均勻（CV=${cv.toFixed(2)}），疑有字體替換` };
+  if(cv > 0.65) return { status:'warn', detail:`字體分佈略有不均（CV=${cv.toFixed(2)}），可能有局部文字修改` };
+  return { status:'pass', detail:`字體像素分佈一致（CV=${cv.toFixed(2)}），視覺風格統一` };
 }
 
 // ─────────────────────────────────────────────
-// RENDER RESULTS
+// RENDER
 // ─────────────────────────────────────────────
-function renderResults(r) {
-  // Ensure all checks are rendered (fill in any not yet revealed via streaming)
-  CHECKS.forEach(c => {
-    const chk = r.checks?.[c.id];
-    if(chk) applyCheckResult(c.id, chk.status, chk.detail || c.detail);
-  });
+function applyCheckResult(key, status, detail) {
+  const el = document.getElementById(`chk-${key}`);
+  const detailEl = document.getElementById(`chk-detail-${key}`);
+  if(!el) return;
+  let cls='check-item ', icon=CHECKS.find(c=>c.id===key)?.icon||'●';
+  if(status==='pass')      { cls+='pass';      icon='✅'; }
+  else if(status==='fail') { cls+='fail';      icon='🚨'; }
+  else                     { cls+='warn-state';icon='⚠️'; }
+  el.className=cls;
+  el.querySelector('.check-icon').textContent=icon;
+  if(detailEl && detail) detailEl.textContent=detail;
+}
 
-  // Risk score
-  const score = r.riskScore ?? 50;
-  const scoreEl = document.getElementById('riskScore');
-  scoreEl.textContent = score;
-  if(score < 30) { scoreEl.className = 'risk-score safe'; }
-  else if(score < 65) { scoreEl.className = 'risk-score warn'; }
-  else { scoreEl.className = 'risk-score danger'; }
+function renderFinalResult(score, verdict, issues, results) {
+  // Score
+  const scoreEl=document.getElementById('riskScore');
+  scoreEl.textContent=score;
+  scoreEl.className='risk-score '+(score<30?'safe':score<55?'warn':'danger');
 
-  // Bar color
-  const bar = document.getElementById('riskBar');
-  bar.style.width = score + '%';
-  bar.style.background = score<30 ? 'var(--safe)' : score<65 ? 'var(--warn)' : 'var(--danger)';
+  // Bar
+  const bar=document.getElementById('riskBar');
+  bar.style.width=score+'%';
+  bar.style.background=score<30?'var(--safe)':score<55?'var(--warn)':'var(--danger)';
 
   // Verdict
-  const verdictEl = document.getElementById('riskVerdict');
-  const verdictMap = { AUTHENTIC:'✅ 真實回單', SUSPICIOUS:'⚠️ 可疑回單', FAKE:'🚨 高風險偽造' };
-  const verdictColor = { AUTHENTIC:'var(--safe)', SUSPICIOUS:'var(--warn)', FAKE:'var(--danger)' };
-  verdictEl.textContent = verdictMap[r.verdict] || r.verdictText || '分析完成';
-  verdictEl.style.color = verdictColor[r.verdict] || 'var(--text)';
-
-  // Blacklist hits
-  const hits = r.checks?.blacklist?.hits || [];
-  if(hits.length > 0 || r.checks?.blacklist?.status === 'fail') {
-    showBlacklistAlert(hits.length > 0 ? hits : ['偵測到修圖軟體痕跡']);
-  }
-
-  // Color profile
-  if(r.colorProfile) document.getElementById('metaColor').textContent = r.colorProfile;
+  const verdictEl=document.getElementById('riskVerdict');
+  const vm={AUTHENTIC:'✅ 本地分析：回單正常',SUSPICIOUS:'⚠️ 本地分析：存在可疑特徵',FAKE:'🚨 本地分析：高風險，建議人工複審'};
+  const vc={AUTHENTIC:'var(--safe)',SUSPICIOUS:'var(--warn)',FAKE:'var(--danger)'};
+  verdictEl.textContent=vm[verdict]; verdictEl.style.color=vc[verdict];
 
   // Summary
-  document.getElementById('resultsBody').innerHTML = `
+  const noteStyle='background:rgba(255,228,77,0.07);border:1px solid rgba(255,228,77,0.25);border-radius:6px;padding:12px 14px;margin-top:12px;font-size:11px;color:#ffe44d;line-height:1.7;font-family:var(--font-mono)';
+  const summaryText = issues.length > 0
+    ? `發現 ${issues.length} 項異常：
+${issues.map((v,i)=>`${i+1}. ${v}`).join('
+')}`
+    : '本地分析未發現明顯異常。
+注意：本地分析為像素層級檢測，準確度有限，建議啟用 AI 完整分析模式以獲得更精準的鑑真結果。';
+
+  document.getElementById('resultsBody').innerHTML=`
     <div class="results-content">
       <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">
-        AI 分析摘要 · ANALYSIS SUMMARY
+        本地分析摘要 · LOCAL ANALYSIS RESULT
       </div>
-      <div class="ai-summary">${escapeHtml(r.summary || '分析完成。')}</div>
-    </div>
-  `;
+      <div class="ai-summary">${escapeHtml(summaryText)}</div>
+      <div style="${noteStyle}">
+        ⚡ 本地模式限制：像素分析無法識別語意、文字內容或字體細節。<br/>
+        完整 AI 鑑真請完成右下角待辦事項以啟用 Claude 分析模式。
+      </div>
+    </div>`;
 }
 
 function renderError(msg) {
-  CHECKS.forEach(c => {
-    const el = document.getElementById(`chk-${c.id}`);
-    if(el) el.className = 'check-item pending';
-  });
-  document.getElementById('resultsBody').innerHTML = `
+  document.getElementById('resultsBody').innerHTML=`
     <div class="results-empty" style="color:var(--danger)">
       ⚠ 分析失敗<br/><span style="color:var(--text-dim);font-size:11px">${escapeHtml(msg)}</span>
-    </div>
-  `;
+    </div>`;
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br/>');
 }
 </script>
 </body>
