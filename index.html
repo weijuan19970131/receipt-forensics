@@ -90,16 +90,7 @@ main{max-width:1400px;margin:0 auto;padding:32px 24px;display:grid;grid-template
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--border-bright);border-radius:3px;}
 footer{grid-column:1/-1;text-align:center;padding:16px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.08em;border-top:1px solid var(--border);}
-#todoBanner{position:fixed;bottom:20px;right:20px;z-index:9000;background:#181c24;border:1px solid rgba(255,228,77,0.4);border-radius:8px;padding:14px 16px;max-width:290px;box-shadow:0 4px 24px rgba(0,0,0,0.5);font-family:var(--font-mono);}
-.todo-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
-.todo-title{font-size:11px;color:#ffe44d;letter-spacing:0.08em;font-weight:700;}
-.todo-close{margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;line-height:1;}
-.todo-item{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
-.todo-item input{margin-top:3px;accent-color:var(--accent);}
-.todo-item span{font-size:11px;color:var(--text);line-height:1.5;}
-.todo-item a{color:var(--accent);text-decoration:none;}
-.todo-item small{color:var(--text-dim);display:block;}
-.todo-footer{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);line-height:1.6;}
+
 @media(max-width:900px){main{grid-template-columns:1fr;}.right-col{grid-column:1;grid-row:auto;}}
 </style>
 </head>
@@ -182,25 +173,7 @@ footer{grid-column:1/-1;text-align:center;padding:16px;font-family:var(--font-mo
   </div>
   <footer>RECEIPT FORENSICS &middot; 回單鑑真系統 &middot; 本地分析模式 &middot; 圖片不離開您的裝置</footer>
 </main>
-<div id="todoBanner">
-  <div class="todo-header">
-    <span>&#128203;</span>
-    <span class="todo-title">待辦事項 &middot; TODO</span>
-    <button class="todo-close" id="todoClose">&#10005;</button>
-  </div>
-  <label class="todo-item">
-    <input type="checkbox" id="todo1"/>
-    <span>申請 Anthropic API Key<br/><a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a></span>
-  </label>
-  <label class="todo-item">
-    <input type="checkbox" id="todo2"/>
-    <span>Vercel 設定環境變數<small>ANTHROPIC_API_KEY = sk-ant-...</small></span>
-  </label>
-  <label class="todo-item">
-    <input type="checkbox" id="todo3"/>
-    <span>上傳 api/analyze.js 到 GitHub<small>啟用完整 AI 鑑真模式</small></span>
-  </label>
-  <div class="todo-footer">完成後可享 AI 完整六項鑑真<br/>每張約 $0.003~0.005 USD</div>
+
 </div>
 <script>
 var CHECKS=[
@@ -214,11 +187,8 @@ var CHECKS=[
 var BLACKLIST=['photoshop','adobe','lightroom','meitu','xingtu','picsart','snapseed','pictureid','thumbnailimage','icc_profile','beautycam','facetune'];
 var currentFile=null,currentImgEl=null,gridActive=false;
 
-document.getElementById('todoClose').addEventListener('click',function(){document.getElementById('todoBanner').style.display='none';});
-['todo1','todo2','todo3'].forEach(function(id){
-  var el=document.getElementById(id);
-  try{if(localStorage.getItem(id)==='1')el.checked=true;}catch(e){}
-  el.addEventListener('change',function(){try{localStorage.setItem(id,el.checked?'1':'0');}catch(e){}});
+
+
 });
 
 function initChecks(){
