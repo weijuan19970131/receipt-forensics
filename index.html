@@ -405,13 +405,42 @@ scanBtn.addEventListener('click',function(){
   }
 
   function chkDatetime(){
-    var mod=new Date(currentFile.lastModified),now=new Date(),diffMin=(now-mod)/60000,h=mod.getHours(),issues=[];
-    if(mod>now)issues.push('檔案時間為未來時間，異常');
-    if(diffMin<5)issues.push('檔案於5分鐘內建立，疑為即時製作');
-    if(h>=0&&h<6)issues.push('修改時間為凌晨'+h+'時，非銀行營業時段');
+    var now=new Date();
+    var issues=[];
+    var refDate=null;
+    var refLabel='';
+
+    // Priority 1: use EXIF capture date if available
+    if(exifData){
+      var rawDt=exifData.DateTimeOriginal||exifData.DateTime||exifData.CreateDate||null;
+      if(rawDt){refDate=new Date(rawDt);refLabel='EXIF 拍攝日期';}
+    }
+    // Priority 2: fall back to file modified date
+    if(!refDate){refDate=new Date(currentFile.lastModified);refLabel='檔案修改時間';}
+
+    var h=refDate.getHours();
+    var diffMin=(now-refDate)/60000;
+
+    // Check 1: future date
+    if(refDate>now)issues.push(refLabel+'為未來時間（'+refDate.toLocaleDateString('zh-TW')+'），異常');
+
+    // Check 2: created within 5 minutes (only for file modified, not EXIF)
+    if(!exifData&&diffMin<5)issues.push('檔案於5分鐘內建立，疑為即時製作');
+
+    // Check 3: outside banking hours (0am-6am)
+    if(h>=0&&h<6)issues.push(refLabel+'為凌晨 '+h+' 時（'+refDate.toLocaleString('zh-TW')+'），非銀行營業時段');
+
+    // Check 4: EXIF date vs file modified date mismatch (catch re-saves)
+    if(exifData&&refLabel==='EXIF 拍攝日期'){
+      var fileMod=new Date(currentFile.lastModified);
+      var gapDays=Math.abs(refDate-fileMod)/(1000*60*60*24);
+      if(gapDays>7)issues.push('EXIF 拍攝日期（'+refDate.toLocaleDateString('zh-TW')+'）與檔案存檔日期（'+fileMod.toLocaleDateString('zh-TW')+'）相差 '+Math.round(gapDays)+' 天，疑為重新製作後另存');
+    }
+
+    var summary=refLabel+'：'+refDate.toLocaleString('zh-TW');
     if(issues.length>=2)return{status:'fail',detail:issues.join('；')};
-    if(issues.length===1)return{status:'warn',detail:issues[0]};
-    return{status:'pass',detail:'檔案時間：'+mod.toLocaleString('zh-TW')+'，時間合理'};
+    if(issues.length===1)return{status:'warn',detail:issues[0]+'（'+summary+'）'};
+    return{status:'pass',detail:summary+'，時間合理'};
   }
 
   function chkSplice(){
@@ -521,7 +550,7 @@ scanBtn.addEventListener('click',function(){
 
       var summary=issues.length>0?'發現 '+issues.length+' 項異常：\n'+issues.map(function(v,i){return (i+1)+'. '+v;}).join('\n'):'本地分析未發現明顯異常。\n注意：本地像素分析準確度有限，建議啟用 AI 完整分析模式。';
       setProgress(100);
-      document.getElementById('resultsBody').innerHTML='<div class="results-content"><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">本地分析摘要</div><div class="ai-summary">'+summary.replace(/\n/g,'<br/>')+'</div><div style="background:rgba(255,228,77,0.07);border:1px solid rgba(255,228,77,0.25);border-radius:6px;padding:12px 14px;margin-top:12px;font-size:11px;color:#ffe44d;line-height:1.7;font-family:var(--font-mono);">本地模式無法識別文字語意。完整 AI 鑑真請完成右下角待辦事項。</div></div>';
+      document.getElementById('resultsBody').innerHTML='<div class="results-content"><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-bottom:10px;text-transform:uppercase;">本地分析摘要</div><div class="ai-summary">'+summary.replace(/\n/g,'<br/>')+'</div></div>';
       scanBtn.disabled=false;document.getElementById('scanSpinner').style.display='none';document.getElementById('scanBtnText').textContent='重新分析';
     }).catch(function(err){
       document.getElementById('resultsBody').innerHTML='<div class="results-empty" style="color:var(--danger)">分析失敗：'+String(err)+'</div>';
